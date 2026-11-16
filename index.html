@@ -253,7 +253,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 <script>
 'use strict';
 /* ====== Grundlagen ====== */
-const APP_VERSION = '2.0.0';
+const APP_VERSION = '2.0.1';
 const ITER = 600000;
 const AAD = new TextEncoder().encode('passwortdepot-v1');
 const $ = (s, r = document) => r.querySelector(s);
@@ -429,7 +429,9 @@ function renderSetup() {
     <p>Wähle deine Tresor-Datei <b>Passwortdepot.pwdepot</b> aus${location.protocol === 'file:' ? ', z. B. aus C:\\Passwortdepot' : ', z. B. aus OneDrive, iCloud oder Google Drive'}. Sie wird nur hier auf dem Gerät entschlüsselt, nichts wird hochgeladen.</p>
     <button type="button" class="btn primary" id="openfile2">${ic('folder')}Meine Tresor-Datei öffnen</button>
     ${Autosave.get() ? `<div class="foot" style="justify-content:center"><button type="button" class="linkbtn" id="restore">Ungespeicherte Änderungen vom ${new Date(Autosave.get().at).toLocaleString('de-DE')} wiederherstellen</button></div>` : ''}
-    <div class="sect" style="text-align:center;margin:30px 0 4px">oder</div>` : ''}
+    <div class="foot" style="margin-top:26px"><button type="button" class="linkbtn" id="shownew">Neuen, leeren Tresor anlegen …</button><button type="button" class="linkbtn" id="about2">Wie sicher ist das?</button></div>` : ''}
+    <div id="create" class="${web ? 'hidden' : ''}">
+    ${web ? `<div class="alert warn" style="margin-top:22px">${ic('alert')}<div><b>Nur für einen zusätzlichen, leeren Tresor.</b> Deinen bestehenden Tresor öffnest du oben über „Meine Tresor-Datei öffnen“. Einen neuen Tresor nie über deine bestehende Datei speichern.</div></div>` : ''}
     <h1 ${web ? 'style="font-size:19px;margin-top:8px"' : ''}>Neuen Tresor anlegen</h1>
     <p>Lege ein Master-Passwort fest. Nur damit lässt sich dein Tresor öffnen. Es wird nirgends gespeichert, also gut merken.</p>
     ${n ? `<div class="importbox">${ic('download')}<div><b>${n} Einträge</b> aus OneNote liegen bereit und werden beim Anlegen verschlüsselt übernommen.</div></div>` : ''}
@@ -439,7 +441,10 @@ function renderSetup() {
     <button class="btn primary" id="go">${ic('shield')}Tresor verschlüsseln & öffnen</button>
     <div class="foot"><span class="small muted">Tipp: 4–5 zufällige Wörter, nach dem Muster Wort-Wort-Wort-Wort-Zahl, aber eigene Wörter</span></div>
     <div class="foot"><button type="button" class="linkbtn" id="openfile">Vorhandene Tresor-Datei öffnen</button><button type="button" class="linkbtn" id="about">Wie sicher ist das?</button></div>
+    </div>
   </form></div>`;
+  if ($('#shownew')) $('#shownew').onclick = () => { $('#create').classList.remove('hidden'); $('#shownew').parentElement.classList.add('hidden'); $('#p1').focus(); };
+  if ($('#about2')) $('#about2').onclick = showAbout;
   const p1 = $('#p1'), p2 = $('#p2');
   p1.addEventListener('input', () => $('#m').innerHTML = meterHTML(p1.value));
   $('#m').innerHTML = meterHTML('');
@@ -866,6 +871,8 @@ const IDB = {
   async set(k, v) { try { const d = await this.open(); await new Promise(res => { const t = d.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = res; t.onerror = res; }); } catch {} }
 };
 const PICK_TYPES = [{description:'Passwortdepot-Tresor', accept:{'application/octet-stream':['.pwdepot']}}];
+// Leerer Tresor bekommt einen anderen Vorschlagsnamen, damit er nie versehentlich den echten überschreibt.
+const vaultName = () => (S.data?.entries?.length ? 'Passwortdepot.pwdepot' : 'Neuer-Tresor.pwdepot');
 async function rememberHandle(h) { S.handle = h; S.fileName = h.name; S.legacy = false; await IDB.set('vault', h); }
 /* --- Sicherheitsnetz: verschlüsselte Zwischenspeicherung im Browser --- */
 const AUTOSAVE_KEY = 'passwortdepot-autosave-v1';
@@ -898,7 +905,7 @@ async function save(manual, forcePick = false) {
       if (!S.handle || forcePick) {
         if (!manual) return;
         let h;
-        try { h = await window.showSaveFilePicker({suggestedName:'Passwortdepot.pwdepot', types:PICK_TYPES}); }
+        try { h = await window.showSaveFilePicker({suggestedName:vaultName(), types:PICK_TYPES}); }
         catch (e) { if (e?.name === 'AbortError') { pickerAborted(text); return; } throw e; }
         await rememberHandle(h);
       }
@@ -907,7 +914,7 @@ async function save(manual, forcePick = false) {
       if (manual) toast(`Gespeichert in ${S.fileName}`, 'save');
     } else {
       if (!manual) return;
-      download(text, 'Passwortdepot.pwdepot', 'application/octet-stream');
+      download(text, vaultName(), 'application/octet-stream');
       S.dirty = false; Autosave.clear();
       downloadedDialog();
     }
@@ -923,7 +930,7 @@ function pickerAborted(text) {
     <div class="alert info">${ic('info')}<div>${DL_HINT}</div></div>
     <div class="btns"><button class="btn" id="dl">${ic('download')}Herunterladen</button><button class="btn primary" id="retry" autofocus>${ic('save')}Nochmal speichern</button></div>`);
   $('#retry', m).onclick = () => { closeModal(); save(true, true); };
-  $('#dl', m).onclick = () => { download(text, 'Passwortdepot.pwdepot', 'application/octet-stream'); downloadedDialog(); };
+  $('#dl', m).onclick = () => { download(text, vaultName(), 'application/octet-stream'); downloadedDialog(); };
 }
 function downloadedDialog() {
   const m = modal(`<h2>Datei heruntergeladen</h2><p class="sub">Die verschlüsselte <b>Passwortdepot.pwdepot</b> liegt in deinem <b>Download-Ordner</b>. Verschiebe sie in deinen Passwortdepot-Ordner und wähle sie beim nächsten Start über „Andere Tresor-Datei öffnen“.</p><div class="btns"><button class="btn primary" id="ok">Verstanden</button></div>`);
@@ -936,11 +943,11 @@ function saveFailed(err, text) {
     <p class="small muted">Technische Meldung: ${esc((err?.name || 'Fehler') + ': ' + (err?.message || err))}</p>
     <div class="btns"><button class="btn" id="dl">${ic('download')}Herunterladen</button><button class="btn primary" id="retry" autofocus>${ic('refresh')}Nochmal versuchen</button></div>`);
   $('#retry', m).onclick = () => { closeModal(); save(true, true); };
-  $('#dl', m).onclick = () => { if (text) download(text, 'Passwortdepot.pwdepot', 'application/octet-stream'); downloadedDialog(); };
+  $('#dl', m).onclick = () => { if (text) download(text, vaultName(), 'application/octet-stream'); downloadedDialog(); };
 }
 function firstSaveDialog(n) {
   const m = modal(`<h2>🔐 Tresor erstellt</h2>
-    <p class="sub">${n ? `${n} Einträge sind jetzt verschlüsselt. ` : ''}Jetzt noch <b>einmal speichern</b>: Wähle einen Ordner, z. B. <b>C:\\Passwortdepot</b>, und behalte den Namen <b>Passwortdepot.pwdepot</b>.</p>
+    <p class="sub">${n ? `${n} Einträge sind jetzt verschlüsselt. ` : ''}Jetzt noch <b>einmal speichern</b>: Wähle einen Ordner, z. B. <b>C:\\Passwortdepot</b>, und behalte den Namen <b>${vaultName()}</b>.${n ? '' : ' <b>Nicht</b> über deine bestehende Tresor-Datei speichern!'}</p>
     <div class="alert info">${ic('info')}<div>Das ist deine Tresor-Datei. Ab dann speichert die App jede Änderung automatisch dort hinein und öffnet sie beim nächsten Start von selbst.</div></div>
     ${n ? `<div class="alert warn">${ic('alert')}<div>Die Import-Daten stehen noch unverschlüsselt in dieser HTML-Datei. Ersetze sie nach dem Speichern durch die leere App.</div></div>` : ''}
     <div class="btns"><button class="btn" id="later">Später</button><button class="btn primary" id="go" autofocus>${ic('save')}Jetzt speichern</button></div>`);
