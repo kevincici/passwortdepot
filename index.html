@@ -253,7 +253,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 <script>
 'use strict';
 /* ====== Grundlagen ====== */
-const APP_VERSION = '2.0.3';
+const APP_VERSION = '2.1.0';
 const ITER = 600000;
 const AAD = new TextEncoder().encode('passwortdepot-v1');
 const $ = (s, r = document) => r.querySelector(s);
@@ -361,7 +361,11 @@ const pwHTML = pw => [...String(pw ?? '')].map(ch => /\d/.test(ch) ? `<span clas
 
 /* ====== Zustand ====== */
 // Ab 2.0: Programm (diese HTML-Datei) und Daten (Tresor-Datei *.pwdepot) sind getrennt.
-const HAS_FS = typeof window.showOpenFilePicker === 'function' && typeof window.showSaveFilePicker === 'function';
+// Direkter Dateizugriff (öffnen + automatisch speichern) nur auf echten Webadressen:
+// Chrome verweigert ihn bei Seiten, die als lokale Datei (file://) geöffnet sind (AbortError nach der Auswahl).
+const IS_LOCAL_FILE = location.protocol === 'file:';
+const HAS_FS = !IS_LOCAL_FILE && typeof window.showOpenFilePicker === 'function' && typeof window.showSaveFilePicker === 'function';
+const WEB_APP = 'https://kevincici.github.io/passwortdepot/';
 const S = {
   blob: readJSON('pd-vault'),      // nur bei alten Versionen: Tresor steckte in der HTML-Datei
   legacy: false, restoreOnly: false,
@@ -428,6 +432,7 @@ function renderSetup() {
     ${web ? `<h1>Tresor öffnen</h1>
     <p>Wähle deine Tresor-Datei <b>Passwortdepot.pwdepot</b> aus${location.protocol === 'file:' ? ', z. B. aus C:\\Passwortdepot' : ', z. B. aus OneDrive, iCloud oder Google Drive'}. Sie wird nur hier auf dem Gerät entschlüsselt, nichts wird hochgeladen.</p>
     <button type="button" class="btn primary" id="openfile2">${ic('folder')}Meine Tresor-Datei öffnen</button>
+    ${IS_LOCAL_FILE ? `<div class="alert info" style="margin-top:16px">${ic('info')}<div>Als lokale Datei kann Chrome nicht automatisch speichern; Speichern geht hier als Download. Für <b>automatisches Speichern</b> öffne die App über <a href="${WEB_APP}" target="_blank" rel="noopener noreferrer" style="color:var(--accent)">${WEB_APP.replace('https://', '')}</a>. Deine Datei bleibt dabei auf deinem Rechner.</div></div>` : ''}
     ${Autosave.get() ? `<div class="foot" style="justify-content:center"><button type="button" class="linkbtn" id="restore">Ungespeicherte Änderungen vom ${new Date(Autosave.get().at).toLocaleString('de-DE')} wiederherstellen</button></div>` : ''}
     <div class="foot" style="margin-top:26px"><button type="button" class="linkbtn" id="shownew">Neuen, leeren Tresor anlegen …</button><button type="button" class="linkbtn" id="about2">Wie sicher ist das?</button></div>` : ''}
     <div id="create" class="${web ? 'hidden' : ''}">
