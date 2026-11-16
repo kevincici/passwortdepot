@@ -120,6 +120,9 @@ textarea.inp{min-height:110px;resize:vertical;font-family:var(--mono);font-size:
 .detail.enter>*:nth-child(2){animation-delay:.03s}.detail.enter>*:nth-child(3){animation-delay:.06s}.detail.enter>*:nth-child(4){animation-delay:.09s}
 @keyframes slidein{from{opacity:0;transform:translateX(14px)}}
 .item.act{box-shadow:inset 3px 0 0 var(--accent)}
+.savebar{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:30;display:flex;align-items:center;gap:12px;width:min(680px,calc(100% - 32px));padding:10px 10px 10px 16px;border-radius:16px;background:var(--bg2);border:1px solid rgba(245,165,36,.45);box-shadow:var(--shadow),0 0 0 4px rgba(245,165,36,.12);font-size:14px;animation:pop .2s}
+.savebar>svg.i{color:var(--warn)}.savebar .btn{white-space:nowrap}
+@media (max-width:820px){.savebar{bottom:90px;flex-wrap:wrap}.savebar .muted{display:none}}
 .side{border-right:1px solid var(--line);padding:16px 12px;overflow:auto;display:flex;flex-direction:column;gap:2px}
 .side h4{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);margin:16px 10px 6px}
 .nav{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:11px;color:var(--muted);font-weight:500;text-align:left;width:100%;transition:.12s}
@@ -250,7 +253,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 'use strict';
 /* ====== Grundlagen ====== */
 const SOURCE = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
-const APP_VERSION = '1.1.1';
+const APP_VERSION = '1.2.0';
 const ITER = 600000;
 const AAD = new TextEncoder().encode('passwortdepot-v1');
 const $ = (s, r = document) => r.querySelector(s);
@@ -400,6 +403,13 @@ function confirmBox(title, text, okLabel = 'OK', danger = false) {
 
 /* ====== Startbildschirme ====== */
 function boot() {
+  const a = Autosave.get();
+  const fileSalt = S.blob?.kdf?.salt;
+  if (a && (!fileSalt || a.blob.kdf.salt === fileSalt) && a.at > (S.blob?.saved || '')) {
+    S.restoreFrom = a;
+    S.blob = a.blob; S.pending = null; S.external = true;
+    return renderLock(`Ungespeicherte Änderungen vom ${new Date(a.at).toLocaleString('de-DE')} gefunden. Gib dein Master-Passwort ein, um sie wiederherzustellen. Danach bitte speichern.`, true);
+  }
   if (S.blob) renderLock(); else renderSetup();
 }
 
@@ -444,6 +454,7 @@ function renderSetup() {
     S.pending = null;
     S.blob = await Vault.seal(S.key, S.salt, S.iter, S.data);
     S.dirty = true;
+    Autosave.put(S.blob);
     renderMain();
     firstSaveDialog(n);
   };
@@ -462,8 +473,9 @@ function renderLock(msg) {
     <div class="err" id="err"></div>
     <button class="btn primary" id="go">${ic('key')}Entsperren</button>
     <div class="foot"><button type="button" class="linkbtn" id="openfile">Andere Tresor-Datei öffnen</button><button type="button" class="linkbtn" id="about">Wie sicher ist das?</button></div>
-    <div class="foot"><span class="small muted">Zuletzt gespeichert: ${S.blob?.saved ? new Date(S.blob.saved).toLocaleString('de-DE') : '–'}</span></div>
+    <div class="foot"><span class="small muted">${S.restoreFrom ? 'Zwischengespeichert' : 'Zuletzt gespeichert'}: ${S.blob?.saved ? new Date(S.blob.saved).toLocaleString('de-DE') : '–'}</span>${S.restoreFrom ? `<button type="button" class="linkbtn" id="skiprestore">Stattdessen Stand der Datei öffnen</button>` : ''}</div>
   </form></div>`;
+  if ($('#skiprestore')) $('#skiprestore').onclick = () => { S.restoreFrom = null; S.external = false; S.blob = readJSON('pd-vault'); S.pending = readJSON('pd-import'); if (S.blob) renderLock(); else renderSetup(); };
   $('#tg').onclick = () => { const p = $('#pw'); p.type = p.type === 'password' ? 'text' : 'password'; $('#tg').innerHTML = ic(p.type === 'password' ? 'eye' : 'eyeoff'); };
   $('#openfile').onclick = openVaultFile;
   $('#about').onclick = showAbout;
@@ -476,7 +488,9 @@ function renderLock(msg) {
       Object.assign(S, {key:r.key, salt:r.salt, iter:r.iter, data:r.data});
       S.data.settings = Object.assign({autolock:5, clip:30, theme:'auto'}, S.data.settings);
       S.v = {cat:'all', q:'', sel:null, reveal:{}};
+      if (S.external) { S.dirty = true; S.external = false; S.restoreFrom = null; }
       applyTheme(); renderMain();
+      if (S.dirty) toast('Wiederhergestellt – bitte jetzt speichern', 'alert');
     } catch {
       busy($('#go'), false);
       $('#err').textContent = 'Falsches Master-Passwort.';
@@ -504,6 +518,7 @@ function renderMain() {
       <section class="list" id="list"></section>
       <section class="detail" id="detail"></section>
     </div>
+    <div class="savebar hidden" id="savebar">${ic('alert')}<span class="grow"><b>Noch nicht in der Datei gespeichert.</b> <span class="muted">Deine Änderungen sind nur im Browser zwischengespeichert.</span></span><button class="btn primary sm" data-a="save">${ic('save')}Jetzt speichern</button></div>
     <button class="btn primary fab" data-a="new" title="Neuer Eintrag">${ic('plus')}</button>
   </div>`;
   $('#q').value = S.v.q;
@@ -592,6 +607,7 @@ function renderStatus() {
   const s = $('#status'); if (!s) return;
   s.className = 'status' + (S.dirty ? ' dirty' : '');
   s.innerHTML = `<span class="dot"></span><span class="txt">${S.saving ? 'Speichert …' : S.dirty ? (S.handle ? 'Wird gespeichert …' : 'Nicht gespeichert') : 'Gespeichert'}</span>`;
+  const bar = $('#savebar'); if (bar) bar.classList.toggle('hidden', !(S.dirty && !S.handle && !S.saving));
 }
 
 /* ====== Klicks ====== */
@@ -819,29 +835,65 @@ function buildHTML(blob) {
   html = html.replace(/<html([^>]*?) data-(auto|theme)="[^"]*"/g, '<html$1').replace(/<html([^>]*?) data-(auto|theme)="[^"]*"/g, '<html$1');
   return html;
 }
-function scheduleSave() { if (!S.handle) return; clearTimeout(S.saveTimer); S.saveTimer = setTimeout(() => save(false), 700); }
+/* --- Sicherheitsnetz: verschlüsselte Zwischenspeicherung im Browser --- */
+const AUTOSAVE_KEY = 'passwortdepot-autosave-v1';
+const Autosave = {
+  get() { try { const a = JSON.parse(localStorage.getItem(AUTOSAVE_KEY) || 'null'); return a && a.blob && a.blob.format === 'passwortdepot' ? a : null; } catch { return null; } },
+  put(blob) { try { localStorage.setItem(AUTOSAVE_KEY, JSON.stringify({blob, at:now()})); } catch {} },
+  clear() { try { localStorage.removeItem(AUTOSAVE_KEY); } catch {} }
+};
+let autoT;
+function scheduleAutosave() {
+  clearTimeout(autoT);
+  autoT = setTimeout(async () => { if (!S.key || !S.dirty) return; try { Autosave.put(await Vault.seal(S.key, S.salt, S.iter, S.data)); } catch {} }, 300);
+}
+
+function scheduleSave() { scheduleAutosave(); if (!S.handle) return; clearTimeout(S.saveTimer); S.saveTimer = setTimeout(() => save(false), 700); }
+async function writeAndVerify(html, iv) {
+  const w = await S.handle.createWritable();
+  await w.write(html); await w.close();
+  const check = await (await S.handle.getFile()).text();
+  if (!check.includes(iv)) { const e = new Error('Die Datei wurde nicht aktualisiert (Kontrolle nach dem Speichern fehlgeschlagen).'); e.name = 'VerifyError'; throw e; }
+}
 async function save(manual, forcePick = false) {
   if (!S.key || S.saving) return;
   S.saving = true; renderStatus();
+  let html = '';
   try {
     S.blob = await Vault.seal(S.key, S.salt, S.iter, S.data);
-    const html = buildHTML(S.blob);
+    html = buildHTML(S.blob);
     if (window.showSaveFilePicker) {
       if (!S.handle || forcePick) {
         if (!manual) return;
-        S.handle = await window.showSaveFilePicker({suggestedName:'Passwortdepot.html', types:[{description:'Passwortdepot', accept:{'text/html':['.html']}}]});
+        try { S.handle = await window.showSaveFilePicker({suggestedName:'Passwortdepot.html', types:[{description:'Passwortdepot', accept:{'text/html':['.html']}}]}); }
+        catch (e) { if (e?.name === 'AbortError') return; throw e; }   // nur hier bedeutet AbortError "abgebrochen"
       }
-      const w = await S.handle.createWritable(); await w.write(html); await w.close();
-      S.dirty = false; if (manual) toast('Verschlüsselt gespeichert', 'save');
+      await writeAndVerify(html, S.blob.iv);
+      S.dirty = false; Autosave.clear();
+      if (manual) toast('Verschlüsselt in die Datei gespeichert', 'save');
     } else {
       if (!manual) return;
       download(html, 'Passwortdepot.html', 'text/html');
-      S.dirty = false;
-      modal(`<h2>Datei heruntergeladen</h2><p class="sub">Dein Browser erlaubt kein direktes Überschreiben. Die neue, verschlüsselte <b>Passwortdepot.html</b> liegt in deinen Downloads. Ersetze damit die alte Datei in deinem Passwortdepot-Ordner.</p><div class="btns"><button class="btn primary" onclick="document.querySelector('.overlay').remove()">Verstanden</button></div>`);
+      S.dirty = false; Autosave.clear();
+      downloadedDialog();
     }
   } catch (err) {
-    if (err?.name !== 'AbortError') { toast('Speichern fehlgeschlagen: ' + (err?.message || err), 'alert'); if (forcePick) S.handle = null; }
+    S.handle = null;
+    saveFailed(err, html);
   } finally { S.saving = false; renderStatus(); }
+}
+function downloadedDialog() {
+  const m = modal(`<h2>Datei heruntergeladen</h2><p class="sub">Die neue, verschlüsselte <b>Passwortdepot.html</b> liegt in deinem <b>Download-Ordner</b>. Verschiebe sie in deinen Passwortdepot-Ordner und ersetze dort die alte Datei.</p><div class="btns"><button class="btn primary" id="ok">Verstanden</button></div>`);
+  $('#ok', m).onclick = closeModal;
+}
+function saveFailed(err, html) {
+  const m = modal(`<h2>⚠️ Speichern hat nicht geklappt</h2>
+    <p class="sub">Deine Änderungen sind <b>nicht verloren</b>: Sie sind verschlüsselt im Browser zwischengespeichert und werden beim nächsten Öffnen angeboten. Damit sie sicher in der Datei landen, nutze jetzt den Ersatzweg:</p>
+    <div class="alert info">${ic('info')}<div><b>Herunterladen</b> legt die verschlüsselte <b>Passwortdepot.html</b> in deinen Download-Ordner. Verschiebe sie danach in deinen Passwortdepot-Ordner und ersetze die alte Datei.</div></div>
+    <p class="small muted">Technische Meldung: ${esc((err?.name || 'Fehler') + ': ' + (err?.message || err))}</p>
+    <div class="btns"><button class="btn" id="retry">${ic('refresh')}Nochmal versuchen</button><button class="btn primary" id="dl" autofocus>${ic('download')}Herunterladen</button></div>`);
+  $('#retry', m).onclick = () => { closeModal(); save(true, true); };
+  $('#dl', m).onclick = () => { if (html) download(html, 'Passwortdepot.html', 'text/html'); S.dirty = false; renderStatus(); downloadedDialog(); };
 }
 function firstSaveDialog(n) {
   const m = modal(`<h2>🔐 Tresor erstellt</h2>
@@ -929,7 +981,7 @@ function openVaultFile() {
       $('#ok', m).onclick = closeModal;
       return;
     }
-    S.blob = b; S.handle = null; S.pending = null;
+    S.blob = b; S.handle = null; S.pending = null; S.external = true;
     renderLock(`„${f.name}“ geladen. Gib das Master-Passwort dieses Tresors ein.`);
   };
   inp.click();

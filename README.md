@@ -51,6 +51,7 @@ node tools/upgrade.js index.html "C:/Passwortdepot/Passwortdepot.html"
 
 ## Versionen
 
+- **1.2.0** (2026-11-16): Speichern wird nachgeprüft (Datei wird wieder eingelesen); Fehler werden angezeigt, statt still ignoriert zu werden, mit Ersatzweg über Download; jede Änderung wird verschlüsselt im Browser zwischengespeichert und beim nächsten Öffnen zur Wiederherstellung angeboten; Leiste „Noch nicht gespeichert“
 - **1.1.1** (2026-11-16): klare Meldung, wenn eine Tresor-Datei geöffnet wird, die noch nie verschlüsselt gespeichert wurde
 - **1.1.0** (2026-11-16): Liste und Details scrollen getrennt (geöffneter Eintrag immer sichtbar, mit Einblend-Animation); Generator-Anzeige kompakter
 - **1.0.1** (2026-11-16): Web-Version zeigt zuerst „Meine Tresor-Datei öffnen“ (für das Handy)
