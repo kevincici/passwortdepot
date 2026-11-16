@@ -31,6 +31,18 @@ Wer das Master-Passwort vergisst, verliert die Daten. Es gibt keine Hintertür.
 - Verschlüsseltes Backup (`.pwdepot`), CSV-Import und -Export
 - Dunkel, hell oder wie das System; für Desktop und Handy angepasst
 
+## Lokaler Dienst (empfohlen am eigenen PC)
+
+Browser speichern Dateien nur über ihr Auswahlfenster, und das war auf dem Ziel-PC nicht zuverlässig. Darum gibt es `dienst/server.js` (Node.js, ohne Abhängigkeiten):
+
+- liefert die App unter `http://127.0.0.1:47811` aus und liest/schreibt `Passwortdepot.pwdepot` im selben Ordner direkt
+- lauscht nur auf 127.0.0.1, prüft Host und Origin, Datenzugriff nur mit eigenem Header
+- speichert nur verschlüsselte Tresor-Daten und überschreibt nie einen Tresor mit anderem Salt (außer beim Master-Passwort-Wechsel)
+- legt vor dem Überschreiben Sicherungen in `backup/` an (höchstens alle 10 Minuten, die letzten 50)
+- gestartet per Doppelklick auf `Passwortdepot starten.vbs`, kein Autostart
+
+Ordner: `Passwortdepot.html`, `Passwortdepot.pwdepot`, `Passwortdepot starten.vbs`, `dienst/server.js`.
+
 ## Benutzung
 
 1. `index.html` herunterladen und z. B. als `Passwortdepot.html` speichern.
@@ -52,6 +64,7 @@ node tools/migrate.js alt/Passwortdepot.html Passwortdepot.pwdepot
 
 ## Versionen
 
+- **2.2.0** (2026-11-16): lokaler Dienst für zuverlässiges automatisches Speichern ohne Auswahlfenster; Schutz gegen Überschreiben durch einen anderen Tresor; automatische Sicherungen. Als lokale Datei (file://) nur klassisches Öffnen und Download.
 - **2.0.1** (2026-11-16): Startbildschirm zeigt nur noch „Tresor-Datei öffnen“; „Neuen Tresor anlegen“ ist versteckt und mit Warnung versehen; ein leerer Tresor wird als `Neuer-Tresor.pwdepot` vorgeschlagen, damit er nie den echten überschreibt
 - **2.0.0** (2026-11-16): Programm und Daten getrennt. Der Tresor liegt in einer eigenen `.pwdepot`-Datei, die der Browser zuverlässig speichern kann (das Überschreiben der HTML-Datei schlug in Chrome fehl). Die App merkt sich die Datei und öffnet sie beim Start; ungespeicherte Änderungen werden beim Entsperren automatisch übernommen.
 - **1.2.1** (2026-11-16): Hinweis mit Download-Ersatzweg, wenn das Speichern-Fenster ohne Speichern zurückkehrt
