@@ -15,7 +15,8 @@
      (default-src 'none'), es werden keine Daten irgendwohin gesendet.
    * Verschlüsselung: AES-256-GCM (Web Crypto API des Browsers).
      Schlüssel aus dem Master-Passwort per PBKDF2-SHA256 mit 600.000 Iterationen und zufälligem Salt.
-   * Die verschlüsselten Daten stehen unten im Script-Block mit der id pd-vault. Ohne Master-Passwort sind sie unlesbar.
+   * Diese Datei ist nur das Programm. Die verschlüsselten Daten liegen in einer eigenen Tresor-Datei (*.pwdepot).
+     Ohne Master-Passwort sind sie unlesbar.
    * Master-Passwort vergessen = Daten verloren. Es gibt keine Hintertür.
 -->
 <style>
@@ -245,15 +246,14 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 </head>
 <body>
 <div id="app"></div>
-<!-- Verschlüsselter Tresor (AES-256-GCM). Wird beim Speichern ersetzt. -->
+<!-- Nur für alte Versionen (bis 1.2): dort stand der verschlüsselte Tresor hier. Ab 2.0 liegt er in einer eigenen .pwdepot-Datei. -->
 <script type="application/json" id="pd-vault"></script>
-<!-- Einmaliger Erst-Import. Wird beim ersten Speichern geleert. -->
+<!-- Optionaler einmaliger Erst-Import (tools/build.js). Danach die leere App verwenden. -->
 <script type="application/json" id="pd-import"></script>
 <script>
 'use strict';
 /* ====== Grundlagen ====== */
-const SOURCE = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
-const APP_VERSION = '1.2.1';
+const APP_VERSION = '2.0.0';
 const ITER = 600000;
 const AAD = new TextEncoder().encode('passwortdepot-v1');
 const $ = (s, r = document) => r.querySelector(s);
@@ -360,13 +360,17 @@ function generate(o) {
 const pwHTML = pw => [...String(pw ?? '')].map(ch => /\d/.test(ch) ? `<span class="d">${ch}</span>` : /\p{L}/u.test(ch) ? esc(ch) : `<span class="s">${esc(ch)}</span>`).join('');
 
 /* ====== Zustand ====== */
+// Ab 2.0: Programm (diese HTML-Datei) und Daten (Tresor-Datei *.pwdepot) sind getrennt.
+const HAS_FS = typeof window.showOpenFilePicker === 'function' && typeof window.showSaveFilePicker === 'function';
 const S = {
-  blob: readJSON('pd-vault'),
+  blob: readJSON('pd-vault'),      // nur bei alten Versionen: Tresor steckte in der HTML-Datei
+  legacy: false, restoreOnly: false,
   pending: readJSON('pd-import'),
   key: null, salt: null, iter: ITER, data: null,
   v: {cat:'all', q:'', sel:null, reveal:{}},
-  dirty: false, handle: null, saving: false, saveTimer: null, idle: null
+  dirty: false, handle: null, fileName: '', saving: false, saveTimer: null, idle: null
 };
+if (S.blob) S.legacy = true;
 const cat = id => S.data.categories.find(c => c.id === id) || {id, name:'Ohne Bereich', emoji:'📁', color:'#8e98b8'};
 function hue(str) { let h = 0; for (const ch of str) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h % 360; }
 const avatar = (e, sz) => `<div class="av" style="${sz ? `width:${sz}px;height:${sz}px;font-size:${Math.round(sz * .43)}px;border-radius:${Math.round(sz * .3)}px;` : ''}background:linear-gradient(135deg,hsl(${hue(e.title)} 65% 55%),hsl(${(hue(e.title) + 40) % 360} 70% 45%))">${esc((e.title.match(/[\p{L}\p{N}]/u) || ['?'])[0])}</div>`;
@@ -402,26 +406,29 @@ function confirmBox(title, text, okLabel = 'OK', danger = false) {
 }
 
 /* ====== Startbildschirme ====== */
-function boot() {
-  const a = Autosave.get();
-  const fileSalt = S.blob?.kdf?.salt;
-  if (a && (!fileSalt || a.blob.kdf.salt === fileSalt) && a.at > (S.blob?.saved || '')) {
-    S.restoreFrom = a;
-    S.blob = a.blob; S.pending = null; S.external = true;
-    return renderLock(`Ungespeicherte Änderungen vom ${new Date(a.at).toLocaleString('de-DE')} gefunden. Gib dein Master-Passwort ein, um sie wiederherzustellen. Danach bitte speichern.`, true);
+async function boot() {
+  if (!S.blob && !S.pending && HAS_FS) {
+    const h = await IDB.get('vault');
+    if (h) { S.handle = h; S.fileName = h.name; return renderLock(); }
   }
   if (S.blob) renderLock(); else renderSetup();
+}
+function restoreAutosave() {
+  const a = Autosave.get(); if (!a) return;
+  S.blob = a.blob; S.restoreOnly = true; S.handle = null; S.fileName = '';
+  renderLock(`Ungespeicherte Änderungen vom ${new Date(a.at).toLocaleString('de-DE')}. Gib dein Master-Passwort ein und speichere sie danach als Tresor-Datei.`);
 }
 
 function renderSetup() {
   const n = Array.isArray(S.pending) ? S.pending.length : 0;
-  const web = !n && location.protocol !== 'file:';
+  const web = !n;
   $('#app').innerHTML = `
   <div class="auth"><form class="auth-card" id="f" autocomplete="off">
     <div class="logo"><div class="mark">${ic('lock')}</div><span>Passwortdepot</span></div>
     ${web ? `<h1>Tresor öffnen</h1>
-    <p>Wähle deine Datei <b>Passwortdepot.html</b> aus, z. B. aus OneDrive, iCloud oder Google Drive. Sie wird nur hier auf dem Gerät entschlüsselt, nichts wird hochgeladen.</p>
+    <p>Wähle deine Tresor-Datei <b>Passwortdepot.pwdepot</b> aus${location.protocol === 'file:' ? ', z. B. aus C:\\Passwortdepot' : ', z. B. aus OneDrive, iCloud oder Google Drive'}. Sie wird nur hier auf dem Gerät entschlüsselt, nichts wird hochgeladen.</p>
     <button type="button" class="btn primary" id="openfile2">${ic('folder')}Meine Tresor-Datei öffnen</button>
+    ${Autosave.get() ? `<div class="foot" style="justify-content:center"><button type="button" class="linkbtn" id="restore">Ungespeicherte Änderungen vom ${new Date(Autosave.get().at).toLocaleString('de-DE')} wiederherstellen</button></div>` : ''}
     <div class="sect" style="text-align:center;margin:30px 0 4px">oder</div>` : ''}
     <h1 ${web ? 'style="font-size:19px;margin-top:8px"' : ''}>Neuen Tresor anlegen</h1>
     <p>Lege ein Master-Passwort fest. Nur damit lässt sich dein Tresor öffnen. Es wird nirgends gespeichert, also gut merken.</p>
@@ -438,6 +445,7 @@ function renderSetup() {
   $('#m').innerHTML = meterHTML('');
   $('#openfile').onclick = openVaultFile;
   if ($('#openfile2')) $('#openfile2').onclick = openVaultFile;
+  if ($('#restore')) $('#restore').onclick = restoreAutosave;
   $('#about').onclick = showAbout;
   $('#f').onsubmit = async e => {
     e.preventDefault();
@@ -468,14 +476,14 @@ function renderLock(msg) {
     <div class="logo"><div class="mark">${ic('lock')}</div><span>Passwortdepot</span></div>
     <h1>Willkommen zurück</h1>
     <p>${msg ? esc(msg) : 'Dein Tresor ist verschlüsselt. Gib dein Master-Passwort ein.'}</p>
+    ${S.fileName ? `<div class="importbox" style="background:rgba(108,140,255,.08);border-color:rgba(108,140,255,.3)">${ic('folder')}<div>Tresor-Datei: <b style="color:var(--text)">${esc(S.fileName)}</b></div></div>` : ''}
     <div class="field"><label for="pw">Master-Passwort</label>
       <div class="row"><input class="inp grow" type="password" id="pw" autofocus autocomplete="current-password"><button type="button" class="ib" id="tg" title="Anzeigen">${ic('eye')}</button></div></div>
     <div class="err" id="err"></div>
     <button class="btn primary" id="go">${ic('key')}Entsperren</button>
     <div class="foot"><button type="button" class="linkbtn" id="openfile">Andere Tresor-Datei öffnen</button><button type="button" class="linkbtn" id="about">Wie sicher ist das?</button></div>
-    <div class="foot"><span class="small muted">${S.restoreFrom ? 'Zwischengespeichert' : 'Zuletzt gespeichert'}: ${S.blob?.saved ? new Date(S.blob.saved).toLocaleString('de-DE') : '–'}</span>${S.restoreFrom ? `<button type="button" class="linkbtn" id="skiprestore">Stattdessen Stand der Datei öffnen</button>` : ''}</div>
+    ${S.blob?.saved ? `<div class="foot"><span class="small muted">${S.restoreOnly ? 'Zwischengespeichert' : 'Zuletzt gespeichert'}: ${new Date(S.blob.saved).toLocaleString('de-DE')}</span></div>` : ''}
   </form></div>`;
-  if ($('#skiprestore')) $('#skiprestore').onclick = () => { S.restoreFrom = null; S.external = false; S.blob = readJSON('pd-vault'); S.pending = readJSON('pd-import'); if (S.blob) renderLock(); else renderSetup(); };
   $('#tg').onclick = () => { const p = $('#pw'); p.type = p.type === 'password' ? 'text' : 'password'; $('#tg').innerHTML = ic(p.type === 'password' ? 'eye' : 'eyeoff'); };
   $('#openfile').onclick = openVaultFile;
   $('#about').onclick = showAbout;
@@ -483,14 +491,37 @@ function renderLock(msg) {
     e.preventDefault();
     const pw = $('#pw').value; if (!pw) return;
     busy($('#go'), true);
+    // 1) Tresor-Datei lesen (beim ersten Mal pro Sitzung fragt der Browser nach Zugriff)
+    if (!S.blob && S.handle) {
+      try {
+        if ((await S.handle.queryPermission({mode:'readwrite'})) !== 'granted' && (await S.handle.requestPermission({mode:'readwrite'})) !== 'granted') { const e = new Error(); e.code = 'perm'; throw e; }
+        const b = extractBlob(await (await S.handle.getFile()).text());
+        if (!b) { const e = new Error(); e.code = 'invalid'; throw e; }
+        S.blob = b;
+      } catch (e) {
+        busy($('#go'), false);
+        $('#err').textContent = e.code === 'perm' ? 'Ohne Zugriff auf die Tresor-Datei geht es nicht. Bitte im Browser-Fenster „Zulassen“ bzw. „Änderungen speichern“ wählen.'
+          : e.code === 'invalid' ? 'Die Tresor-Datei ist ungültig oder beschädigt.'
+          : 'Die Tresor-Datei wurde nicht gefunden (verschoben oder umbenannt?). Bitte „Andere Tresor-Datei öffnen“.';
+        return;
+      }
+    }
+    // 2) Entschlüsseln, ggf. neuere Zwischenspeicherung übernehmen
     try {
-      const r = await Vault.open(pw, S.blob);
+      let r = await Vault.open(pw, S.blob), restored = false;
+      const a = Autosave.get();
+      if (a && !S.restoreOnly && a.blob.kdf.salt === S.blob.kdf.salt && a.at > (S.blob.saved || '')) { try { r = await Vault.open(pw, a.blob); restored = true; } catch {} }
       Object.assign(S, {key:r.key, salt:r.salt, iter:r.iter, data:r.data});
       S.data.settings = Object.assign({autolock:5, clip:30, theme:'auto'}, S.data.settings);
       S.v = {cat:'all', q:'', sel:null, reveal:{}};
-      if (S.external) { S.dirty = true; S.external = false; S.restoreFrom = null; }
+      const wasLegacy = S.legacy && !S.handle;
+      if (restored || S.restoreOnly || wasLegacy) S.dirty = true;
+      const wasRestore = restored || S.restoreOnly;
+      S.restoreOnly = false;
       applyTheme(); renderMain();
-      if (S.dirty) toast('Wiederhergestellt – bitte jetzt speichern', 'alert');
+      if (wasRestore) toast('Ungespeicherte Änderungen wiederhergestellt', 'alert');
+      if (wasLegacy) legacyDialog();
+      if (S.dirty) scheduleSave();
     } catch {
       busy($('#go'), false);
       $('#err').textContent = 'Falsches Master-Passwort.';
@@ -662,12 +693,12 @@ function toggleMenu() {
   const m = document.createElement('div'); m.className = 'menu';
   const it = (a, i, t) => `<button data-m="${a}">${ic(i)}${t}</button>`;
   m.innerHTML = it('audit', 'shield', 'Sicherheitscheck') + it('gen', 'dice', 'Passwort-Generator') + it('cats', 'tag', 'Bereiche verwalten') + '<hr>' +
-    it('saveas', 'save', 'Speichern unter … (z. B. USB-Stick)') + it('backup', 'download', 'Verschlüsseltes Backup herunterladen') + it('importcsv', 'upload', 'CSV importieren') + it('exportcsv', 'download', 'Als CSV exportieren (unverschlüsselt)') + '<hr>' +
+    it('open', 'folder', 'Andere Tresor-Datei öffnen') + it('saveas', 'save', 'Tresor-Datei speichern unter … (z. B. USB-Stick)') +it('backup', 'download', 'Verschlüsseltes Backup herunterladen') + it('importcsv', 'upload', 'CSV importieren') + it('exportcsv', 'download', 'Als CSV exportieren (unverschlüsselt)') + '<hr>' +
     it('settings', 'sliders', 'Einstellungen') + it('master', 'key', 'Master-Passwort ändern') + it('about', 'info', 'Sicherheit & Transparenz');
   $('.top').appendChild(m);
   m.addEventListener('click', ev => {
     const b = ev.target.closest('[data-m]'); if (!b) return; m.remove();
-    ({audit, gen:() => generatorModal(), cats:manageCats, saveas:() => save(true, true), backup:downloadBackup, importcsv:importCSV, exportcsv:exportCSV, settings, master:changeMaster, about:showAbout})[b.dataset.m]();
+    ({open:async () => { await lock(); openVaultFile(); }, audit, gen:() => generatorModal(), cats:manageCats, saveas:() => save(true, true), backup:downloadBackup, importcsv:importCSV, exportcsv:exportCSV, settings, master:changeMaster, about:showAbout})[b.dataset.m]();
   });
   setTimeout(() => document.addEventListener('mousedown', function h(e) { if (!e.target.closest('.menu') && !e.target.closest('[data-a="menu"]')) { $('.menu')?.remove(); } document.removeEventListener('mousedown', h); }), 0);
 }
@@ -827,14 +858,15 @@ function changeMaster() {
   };
 }
 
-/* ====== Speichern ====== */
-function buildHTML(blob) {
-  const put = (src, id, content) => src.replace(new RegExp(`(<script[^>]*id="${id}"[^>]*>)[\\s\\S]*?(<\\/script>)`), (_, a, b) => a + content + b);
-  let html = put(SOURCE, 'pd-vault', JSON.stringify(blob));
-  html = put(html, 'pd-import', '');
-  html = html.replace(/<html([^>]*?) data-(auto|theme)="[^"]*"/g, '<html$1').replace(/<html([^>]*?) data-(auto|theme)="[^"]*"/g, '<html$1');
-  return html;
-}
+/* ====== Speichern (Tresor-Datei *.pwdepot) ====== */
+// Merkt sich nur den VERWEIS auf die Tresor-Datei im Browser (IndexedDB), nie deren Inhalt.
+const IDB = {
+  open() { return new Promise((res, rej) => { const r = indexedDB.open('passwortdepot', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); },
+  async get(k) { try { const d = await this.open(); return await new Promise(res => { const q = d.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => res(q.result || null); q.onerror = () => res(null); }); } catch { return null; } },
+  async set(k, v) { try { const d = await this.open(); await new Promise(res => { const t = d.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = res; t.onerror = res; }); } catch {} }
+};
+const PICK_TYPES = [{description:'Passwortdepot-Tresor', accept:{'application/octet-stream':['.pwdepot']}}];
+async function rememberHandle(h) { S.handle = h; S.fileName = h.name; S.legacy = false; await IDB.set('vault', h); }
 /* --- Sicherheitsnetz: verschlüsselte Zwischenspeicherung im Browser --- */
 const AUTOSAVE_KEY = 'passwortdepot-autosave-v1';
 const Autosave = {
@@ -849,65 +881,76 @@ function scheduleAutosave() {
 }
 
 function scheduleSave() { scheduleAutosave(); if (!S.handle) return; clearTimeout(S.saveTimer); S.saveTimer = setTimeout(() => save(false), 700); }
-async function writeAndVerify(html, iv) {
+async function writeAndVerify(text, iv) {
   const w = await S.handle.createWritable();
-  await w.write(html); await w.close();
+  await w.write(text); await w.close();
   const check = await (await S.handle.getFile()).text();
   if (!check.includes(iv)) { const e = new Error('Die Datei wurde nicht aktualisiert (Kontrolle nach dem Speichern fehlgeschlagen).'); e.name = 'VerifyError'; throw e; }
 }
 async function save(manual, forcePick = false) {
   if (!S.key || S.saving) return;
   S.saving = true; renderStatus();
-  let html = '';
+  let text = '';
   try {
     S.blob = await Vault.seal(S.key, S.salt, S.iter, S.data);
-    html = buildHTML(S.blob);
-    if (window.showSaveFilePicker) {
+    text = JSON.stringify(S.blob);
+    if (HAS_FS) {
       if (!S.handle || forcePick) {
         if (!manual) return;
-        try { S.handle = await window.showSaveFilePicker({suggestedName:'Passwortdepot.html', types:[{description:'Passwortdepot', accept:{'text/html':['.html']}}]}); }
-        catch (e) { if (e?.name === 'AbortError') { pickerAborted(html); return; } throw e; }
+        let h;
+        try { h = await window.showSaveFilePicker({suggestedName:'Passwortdepot.pwdepot', types:PICK_TYPES}); }
+        catch (e) { if (e?.name === 'AbortError') { pickerAborted(text); return; } throw e; }
+        await rememberHandle(h);
       }
-      await writeAndVerify(html, S.blob.iv);
+      await writeAndVerify(text, S.blob.iv);
       S.dirty = false; Autosave.clear();
-      if (manual) toast('Verschlüsselt in die Datei gespeichert', 'save');
+      if (manual) toast(`Gespeichert in ${S.fileName}`, 'save');
     } else {
       if (!manual) return;
-      download(html, 'Passwortdepot.html', 'text/html');
+      download(text, 'Passwortdepot.pwdepot', 'application/octet-stream');
       S.dirty = false; Autosave.clear();
       downloadedDialog();
     }
   } catch (err) {
     S.handle = null;
-    saveFailed(err, html);
+    saveFailed(err, text);
   } finally { S.saving = false; renderStatus(); }
 }
-function pickerAborted(html) {
+const DL_HINT = `<b>Herunterladen</b> legt die verschlüsselte Tresor-Datei <b>Passwortdepot.pwdepot</b> in deinen Download-Ordner. Verschiebe sie danach z. B. nach <b>C:\\Passwortdepot</b> und öffne sie über „Andere Tresor-Datei öffnen“.`;
+function pickerAborted(text) {
   const m = modal(`<h2>Nicht gespeichert</h2>
-    <p class="sub">Das Speichern-Fenster wurde ohne Speichern geschlossen. Falls du nicht selbst abgebrochen hast, hat der Browser das Überschreiben der Datei verweigert.</p>
-    <div class="alert info">${ic('info')}<div><b>Sicherer Weg:</b> „Herunterladen“ legt die verschlüsselte <b>Passwortdepot.html</b> in deinen Download-Ordner. Verschiebe sie danach nach <b>C:\\Passwortdepot</b> und ersetze dort die alte Datei.</div></div>
-    <div class="btns"><button class="btn" id="retry">${ic('refresh')}Nochmal auswählen</button><button class="btn primary" id="dl" autofocus>${ic('download')}Herunterladen</button></div>`);
+    <p class="sub">Das Speichern-Fenster wurde ohne Speichern geschlossen. Deine Änderungen sind verschlüsselt im Browser zwischengespeichert.</p>
+    <div class="alert info">${ic('info')}<div>${DL_HINT}</div></div>
+    <div class="btns"><button class="btn" id="dl">${ic('download')}Herunterladen</button><button class="btn primary" id="retry" autofocus>${ic('save')}Nochmal speichern</button></div>`);
   $('#retry', m).onclick = () => { closeModal(); save(true, true); };
-  $('#dl', m).onclick = () => { download(html, 'Passwortdepot.html', 'text/html'); S.dirty = false; renderStatus(); downloadedDialog(); };
+  $('#dl', m).onclick = () => { download(text, 'Passwortdepot.pwdepot', 'application/octet-stream'); downloadedDialog(); };
 }
 function downloadedDialog() {
-  const m = modal(`<h2>Datei heruntergeladen</h2><p class="sub">Die neue, verschlüsselte <b>Passwortdepot.html</b> liegt in deinem <b>Download-Ordner</b>. Verschiebe sie in deinen Passwortdepot-Ordner und ersetze dort die alte Datei.</p><div class="btns"><button class="btn primary" id="ok">Verstanden</button></div>`);
+  const m = modal(`<h2>Datei heruntergeladen</h2><p class="sub">Die verschlüsselte <b>Passwortdepot.pwdepot</b> liegt in deinem <b>Download-Ordner</b>. Verschiebe sie in deinen Passwortdepot-Ordner und wähle sie beim nächsten Start über „Andere Tresor-Datei öffnen“.</p><div class="btns"><button class="btn primary" id="ok">Verstanden</button></div>`);
   $('#ok', m).onclick = closeModal;
 }
-function saveFailed(err, html) {
+function saveFailed(err, text) {
   const m = modal(`<h2>⚠️ Speichern hat nicht geklappt</h2>
-    <p class="sub">Deine Änderungen sind <b>nicht verloren</b>: Sie sind verschlüsselt im Browser zwischengespeichert und werden beim nächsten Öffnen angeboten. Damit sie sicher in der Datei landen, nutze jetzt den Ersatzweg:</p>
-    <div class="alert info">${ic('info')}<div><b>Herunterladen</b> legt die verschlüsselte <b>Passwortdepot.html</b> in deinen Download-Ordner. Verschiebe sie danach in deinen Passwortdepot-Ordner und ersetze die alte Datei.</div></div>
+    <p class="sub">Deine Änderungen sind <b>nicht verloren</b>: Sie sind verschlüsselt im Browser zwischengespeichert und werden beim nächsten Öffnen wiederhergestellt.</p>
+    <div class="alert info">${ic('info')}<div>${DL_HINT}</div></div>
     <p class="small muted">Technische Meldung: ${esc((err?.name || 'Fehler') + ': ' + (err?.message || err))}</p>
-    <div class="btns"><button class="btn" id="retry">${ic('refresh')}Nochmal versuchen</button><button class="btn primary" id="dl" autofocus>${ic('download')}Herunterladen</button></div>`);
+    <div class="btns"><button class="btn" id="dl">${ic('download')}Herunterladen</button><button class="btn primary" id="retry" autofocus>${ic('refresh')}Nochmal versuchen</button></div>`);
   $('#retry', m).onclick = () => { closeModal(); save(true, true); };
-  $('#dl', m).onclick = () => { if (html) download(html, 'Passwortdepot.html', 'text/html'); S.dirty = false; renderStatus(); downloadedDialog(); };
+  $('#dl', m).onclick = () => { if (text) download(text, 'Passwortdepot.pwdepot', 'application/octet-stream'); downloadedDialog(); };
 }
 function firstSaveDialog(n) {
   const m = modal(`<h2>🔐 Tresor erstellt</h2>
-    <p class="sub">${n ? `${n} Einträge sind jetzt verschlüsselt. ` : ''}Jetzt noch <b>einmal speichern</b>: Wähle im nächsten Fenster die Datei <b>Passwortdepot.html</b> in deinem Ordner aus und bestätige <b>Ersetzen</b>.</p>
-    <div class="alert info">${ic('info')}<div>Danach ist der unverschlüsselte Import aus der Datei entfernt und die App speichert jede Änderung automatisch.</div></div>
+    <p class="sub">${n ? `${n} Einträge sind jetzt verschlüsselt. ` : ''}Jetzt noch <b>einmal speichern</b>: Wähle einen Ordner, z. B. <b>C:\\Passwortdepot</b>, und behalte den Namen <b>Passwortdepot.pwdepot</b>.</p>
+    <div class="alert info">${ic('info')}<div>Das ist deine Tresor-Datei. Ab dann speichert die App jede Änderung automatisch dort hinein und öffnet sie beim nächsten Start von selbst.</div></div>
+    ${n ? `<div class="alert warn">${ic('alert')}<div>Die Import-Daten stehen noch unverschlüsselt in dieser HTML-Datei. Ersetze sie nach dem Speichern durch die leere App.</div></div>` : ''}
     <div class="btns"><button class="btn" id="later">Später</button><button class="btn primary" id="go" autofocus>${ic('save')}Jetzt speichern</button></div>`);
+  $('#later', m).onclick = closeModal;
+  $('#go', m).onclick = async () => { closeModal(); await save(true); };
+}
+function legacyDialog() {
+  const m = modal(`<h2>Neu: eigene Tresor-Datei</h2>
+    <p class="sub">Dein Tresor steckt noch in der HTML-Datei. Ab jetzt werden Programm und Daten getrennt: Deine Daten kommen in eine eigene Datei <b>Passwortdepot.pwdepot</b>. Die kann der Browser zuverlässig speichern, und am Handy wählst du einfach diese Datei aus.</p>
+    <div class="btns"><button class="btn" id="later">Später</button><button class="btn primary" id="go" autofocus>${ic('save')}Tresor-Datei anlegen</button></div>`);
   $('#later', m).onclick = closeModal;
   $('#go', m).onclick = async () => { closeModal(); await save(true); };
 }
@@ -973,24 +1016,39 @@ function extractBlob(text) {
   const m = text.match(/<script[^>]*id="pd-vault"[^>]*>([\s\S]*?)<\/script>/);
   try { const b = JSON.parse(m ? m[1] : text); return b && b.format === 'passwortdepot' && b.data ? b : null; } catch { return null; }
 }
-function openVaultFile() {
-  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.html,.htm,.pwdepot,.json';
+function notAVault(name, text) {
+  const isApp = /id="pd-vault"/.test(text);
+  const m = modal(`<h2>${isApp ? 'Das ist das Programm' : 'Keine Tresor-Datei'}</h2>
+    <p class="sub">${isApp
+      ? `„${esc(name)}“ ist die App selbst und enthält keinen Tresor. Wähle deine Tresor-Datei <b>Passwortdepot.pwdepot</b>.`
+      : `„${esc(name)}“ ist keine Passwortdepot-Datei. Wähle deine <b>Passwortdepot.pwdepot</b> oder ein Backup.`}</p>
+    <div class="btns"><button class="btn primary" id="ok">Verstanden</button></div>`);
+  $('#ok', m).onclick = closeModal;
+}
+function loaded(name, b, handle) {
+  S.blob = b; S.pending = null; S.restoreOnly = false;
+  if (handle) S.legacy = false;
+  else { S.handle = null; S.fileName = name; S.legacy = /\.html?$/i.test(name); }
+  renderLock(`„${name}“ geladen. Gib das Master-Passwort dieses Tresors ein.`);
+}
+async function openVaultFile() {
+  if (HAS_FS) {
+    let h;
+    try { [h] = await window.showOpenFilePicker({types:[{description:'Passwortdepot-Tresor', accept:{'application/octet-stream':['.pwdepot'], 'text/html':['.html']}}]}); }
+    catch (e) { if (e?.name !== 'AbortError') toast('Öffnen fehlgeschlagen: ' + (e?.message || e), 'alert'); return; }
+    const f = await h.getFile(), text = await f.text(), b = extractBlob(text);
+    if (!b) return notAVault(f.name, text);
+    if (/\.html?$/i.test(f.name)) return loaded(f.name, b, null);   // alte Version: Tresor in HTML
+    await rememberHandle(h);
+    return loaded(f.name, b, h);
+  }
+  // Handy / Browser ohne Dateizugriff: nur lesen, Speichern = Download
+  const inp = document.createElement('input'); inp.type = 'file';
   inp.onchange = async () => {
     const f = inp.files[0]; if (!f) return;
-    const text = await f.text();
-    const b = extractBlob(text);
-    if (!b) {
-      const isApp = /id="pd-vault"/.test(text);
-      const m = modal(`<h2>${isApp ? 'Tresor noch nicht gespeichert' : 'Keine Tresor-Datei'}</h2>
-        <p class="sub">${isApp
-          ? `„${esc(f.name)}“ ist eine Passwortdepot-Datei, enthält aber <b>noch keinen verschlüsselten Tresor</b>. Öffne sie zuerst am PC, lege dein Master-Passwort fest und klicke auf <b>Speichern</b> (dieselbe Datei auswählen, Ersetzen). Danach lädst du die gespeicherte Datei in deinen Cloud-Speicher.`
-          : `„${esc(f.name)}“ ist keine Passwortdepot-Datei. Wähle deine <b>Passwortdepot.html</b> oder ein Backup (<b>.pwdepot</b>).`}</p>
-        <div class="btns"><button class="btn primary" id="ok">Verstanden</button></div>`);
-      $('#ok', m).onclick = closeModal;
-      return;
-    }
-    S.blob = b; S.handle = null; S.pending = null; S.external = true;
-    renderLock(`„${f.name}“ geladen. Gib das Master-Passwort dieses Tresors ein.`);
+    const text = await f.text(), b = extractBlob(text);
+    if (!b) return notAVault(f.name, text);
+    loaded(f.name, b, null);
   };
   inp.click();
 }
@@ -1007,7 +1065,7 @@ function showAbout() {
     <h3>🌐 Kein Internet</h3>
     <p>Eine Sicherheitsregel im Dateikopf (<b>Content-Security-Policy</b>) verbietet der App jede Netzwerkverbindung. Deine Daten können also nirgendwohin gesendet werden, auch nicht versehentlich.</p>
     <h3>💾 Wo liegen die Daten?</h3>
-    <p>Nur in dieser einen Datei. Der Tresor steht verschlüsselt im Block <b>pd-vault</b> am Ende der Datei. Du kannst sie mit jedem Texteditor öffnen und siehst nur Zeichensalat. Ordner kopieren genügt, z. B. auf einen USB-Stick.</p>
+    <p>In deiner Tresor-Datei${S.fileName ? ` <b>${esc(S.fileName)}</b>` : ' (<b>.pwdepot</b>)'}, getrennt vom Programm. Sie enthält nur verschlüsselten Text; öffne sie mit einem Texteditor und du siehst Zeichensalat. Der Browser merkt sich nur, <i>welche</i> Datei du benutzt, nicht ihren Inhalt. Für den USB-Stick einfach den Ordner kopieren.</p>
     <h3>🔍 Selbst prüfen</h3>
     <p>Der komplette Programmcode steht lesbar in dieser Datei (Rechtsklick → Seitenquelltext). Es gibt keinen Server, kein Konto und keine Hintertür.</p>
     <h3>⚠️ Wichtig</h3>

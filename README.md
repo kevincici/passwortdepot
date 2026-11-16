@@ -1,9 +1,9 @@
 ﻿# 🔐 Passwortdepot
 
-Ein persönlicher, portabler Passwort-Tresor in **einer einzigen HTML-Datei**. Er läuft komplett lokal im Browser: ohne Installation, ohne Server und ohne Konto.
+Ein persönlicher, portabler Passwort-Tresor: **eine HTML-Datei als Programm** und **eine verschlüsselte Tresor-Datei** (`.pwdepot`) für die Daten. Er läuft komplett lokal im Browser: ohne Installation, ohne Server und ohne Konto.
 
 **Web-Version (ohne Daten):** https://kevincici.github.io/passwortdepot/
-Dort öffnest du deine eigene, verschlüsselte Tresor-Datei, zum Beispiel am Handy aus OneDrive, iCloud oder Google Drive.
+Dort öffnest du deine eigene Tresor-Datei `Passwortdepot.pwdepot`, zum Beispiel am Handy aus OneDrive, iCloud oder Google Drive.
 
 > Dieses Repository enthält **nur die App, keine Daten**. Tresor-Dateien und Exporte sind per `.gitignore` ausgeschlossen.
 
@@ -15,7 +15,8 @@ Dort öffnest du deine eigene, verschlüsselte Tresor-Datei, zum Beispiel am Han
 | Schlüsselableitung | PBKDF2-SHA256, 600.000 Runden, zufälliges Salt (16 Byte) |
 | Umsetzung | Web Crypto API des Browsers, keine fremden Bibliotheken |
 | Netzwerk | per Content-Security-Policy `default-src 'none'` vollständig gesperrt |
-| Speicherort | verschlüsselter JSON-Block `pd-vault` direkt in der HTML-Datei |
+| Speicherort | eigene Tresor-Datei `*.pwdepot` (JSON mit Salt, IV und Geheimtext); der Browser merkt sich nur den Verweis auf die Datei |
+| Sicherheitsnetz | jede Änderung zusätzlich verschlüsselt im Browser (localStorage) zwischengespeichert, bis sie in der Datei steht |
 
 Wer das Master-Passwort vergisst, verliert die Daten. Es gibt keine Hintertür.
 
@@ -33,24 +34,25 @@ Wer das Master-Passwort vergisst, verliert die Daten. Es gibt keine Hintertür.
 ## Benutzung
 
 1. `index.html` herunterladen und z. B. als `Passwortdepot.html` speichern.
-2. Mit Edge oder Chrome öffnen und ein Master-Passwort festlegen.
-3. Speichern (Strg+S) und dabei dieselbe Datei auswählen, um sie zu überschreiben. Danach speichert die App automatisch.
+2. Mit Edge oder Chrome öffnen, ein Master-Passwort festlegen und die Tresor-Datei `Passwortdepot.pwdepot` speichern.
+3. Ab dann öffnet die App diese Datei beim Start von selbst und speichert jede Änderung automatisch hinein. Nachgeprüft wird das, indem die Datei nach dem Schreiben wieder eingelesen wird.
 
-In Firefox und Safari lädt „Speichern“ stattdessen eine neue Datei herunter.
+In Firefox, Safari und am Handy gibt es keinen direkten Dateizugriff: Dort wird die Tresor-Datei ausgewählt und gelesen; „Speichern“ lädt eine neue `.pwdepot` herunter.
 
 ## Werkzeuge
 
 | Skript | Zweck |
 |---|---|
 | `tools/build.js` | Baut eine App-Datei mit einmaligem Erst-Import (JSON), der beim ersten Speichern verschlüsselt wird |
-| `tools/upgrade.js` | Bringt eine bestehende Tresor-Datei auf die neue App-Version; der verschlüsselte Tresor bleibt unverändert, das Master-Passwort ist nicht nötig |
+| `tools/migrate.js` | Umzug von 1.x: holt den verschlüsselten Tresor aus einer alten HTML-Datei in eine `.pwdepot`-Datei (ohne Entschlüsselung) |
 
 ```bash
-node tools/upgrade.js index.html "C:/Passwortdepot/Passwortdepot.html"
+node tools/migrate.js alt/Passwortdepot.html Passwortdepot.pwdepot
 ```
 
 ## Versionen
 
+- **2.0.0** (2026-11-16): Programm und Daten getrennt. Der Tresor liegt in einer eigenen `.pwdepot`-Datei, die der Browser zuverlässig speichern kann (das Überschreiben der HTML-Datei schlug in Chrome fehl). Die App merkt sich die Datei und öffnet sie beim Start; ungespeicherte Änderungen werden beim Entsperren automatisch übernommen.
 - **1.2.1** (2026-11-16): Hinweis mit Download-Ersatzweg, wenn das Speichern-Fenster ohne Speichern zurückkehrt
 - **1.2.0** (2026-11-16): Speichern wird nachgeprüft (Datei wird wieder eingelesen); Fehler werden angezeigt, statt still ignoriert zu werden, mit Ersatzweg über Download; jede Änderung wird verschlüsselt im Browser zwischengespeichert und beim nächsten Öffnen zur Wiederherstellung angeboten; Leiste „Noch nicht gespeichert“
 - **1.1.1** (2026-11-16): klare Meldung, wenn eine Tresor-Datei geöffnet wird, die noch nie verschlüsselt gespeichert wurde
