@@ -246,7 +246,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 'use strict';
 /* ====== Grundlagen ====== */
 const SOURCE = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.0.1';
 const ITER = 600000;
 const AAD = new TextEncoder().encode('passwortdepot-v1');
 const $ = (s, r = document) => r.querySelector(s);
@@ -401,10 +401,15 @@ function boot() {
 
 function renderSetup() {
   const n = Array.isArray(S.pending) ? S.pending.length : 0;
+  const web = !n && location.protocol !== 'file:';
   $('#app').innerHTML = `
   <div class="auth"><form class="auth-card" id="f" autocomplete="off">
     <div class="logo"><div class="mark">${ic('lock')}</div><span>Passwortdepot</span></div>
-    <h1>Neuen Tresor anlegen</h1>
+    ${web ? `<h1>Tresor öffnen</h1>
+    <p>Wähle deine Datei <b>Passwortdepot.html</b> aus, z. B. aus OneDrive, iCloud oder Google Drive. Sie wird nur hier auf dem Gerät entschlüsselt, nichts wird hochgeladen.</p>
+    <button type="button" class="btn primary" id="openfile2">${ic('folder')}Meine Tresor-Datei öffnen</button>
+    <div class="sect" style="text-align:center;margin:30px 0 4px">oder</div>` : ''}
+    <h1 ${web ? 'style="font-size:19px;margin-top:8px"' : ''}>Neuen Tresor anlegen</h1>
     <p>Lege ein Master-Passwort fest. Nur damit lässt sich dein Tresor öffnen. Es wird nirgends gespeichert, also gut merken.</p>
     ${n ? `<div class="importbox">${ic('download')}<div><b>${n} Einträge</b> aus OneNote liegen bereit und werden beim Anlegen verschlüsselt übernommen.</div></div>` : ''}
     <div class="field"><label for="p1">Master-Passwort</label><input class="inp" type="password" id="p1" autofocus autocomplete="new-password"><div id="m"></div></div>
@@ -418,6 +423,7 @@ function renderSetup() {
   p1.addEventListener('input', () => $('#m').innerHTML = meterHTML(p1.value));
   $('#m').innerHTML = meterHTML('');
   $('#openfile').onclick = openVaultFile;
+  if ($('#openfile2')) $('#openfile2').onclick = openVaultFile;
   $('#about').onclick = showAbout;
   $('#f').onsubmit = async e => {
     e.preventDefault();

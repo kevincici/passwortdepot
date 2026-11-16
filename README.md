@@ -51,4 +51,5 @@ node tools/update.js index.html "C:/Passwortdepot/Passwortdepot.html" Passwortde
 
 ## Versionen
 
+- **1.0.1** (2026-11-16): Web-Version zeigt zuerst „Meine Tresor-Datei öffnen“ (für das Handy)
 - **1.0.0** (2026-11-16): erste Version
