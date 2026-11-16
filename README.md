@@ -52,6 +52,7 @@ node tools/migrate.js alt/Passwortdepot.html Passwortdepot.pwdepot
 
 ## Versionen
 
+- **2.0.1** (2026-11-16): Startbildschirm zeigt nur noch „Tresor-Datei öffnen“; „Neuen Tresor anlegen“ ist versteckt und mit Warnung versehen; ein leerer Tresor wird als `Neuer-Tresor.pwdepot` vorgeschlagen, damit er nie den echten überschreibt
 - **2.0.0** (2026-11-16): Programm und Daten getrennt. Der Tresor liegt in einer eigenen `.pwdepot`-Datei, die der Browser zuverlässig speichern kann (das Überschreiben der HTML-Datei schlug in Chrome fehl). Die App merkt sich die Datei und öffnet sie beim Start; ungespeicherte Änderungen werden beim Entsperren automatisch übernommen.
 - **1.2.1** (2026-11-16): Hinweis mit Download-Ersatzweg, wenn das Speichern-Fenster ohne Speichern zurückkehrt
 - **1.2.0** (2026-11-16): Speichern wird nachgeprüft (Datei wird wieder eingelesen); Fehler werden angezeigt, statt still ignoriert zu werden, mit Ersatzweg über Download; jede Änderung wird verschlüsselt im Browser zwischengespeichert und beim nächsten Öffnen zur Wiederherstellung angeboten; Leiste „Noch nicht gespeichert“
