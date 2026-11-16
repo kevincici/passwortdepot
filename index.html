@@ -1,0 +1,961 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#0b1020">
+<title>Passwortdepot</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%236c8cff'/%3E%3Cstop offset='1' stop-color='%23a77bff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='16' fill='url(%23g)'/%3E%3Crect x='18' y='29' width='28' height='22' rx='5' fill='white'/%3E%3Cpath d='M24 29v-6a8 8 0 0 1 16 0v6' stroke='white' stroke-width='5' fill='none'/%3E%3Ccircle cx='32' cy='40' r='3.5' fill='%236c8cff'/%3E%3C/svg%3E">
+<!--
+  PASSWORTDEPOT – persönlicher, portabler Passwort-Tresor in einer einzigen Datei.
+  Transparenz:
+   * Alles läuft lokal im Browser. Die Content-Security-Policy oben verbietet jede Netzwerkverbindung
+     (default-src 'none'), es werden keine Daten irgendwohin gesendet.
+   * Verschlüsselung: AES-256-GCM (Web Crypto API des Browsers).
+     Schlüssel aus dem Master-Passwort per PBKDF2-SHA256 mit 600.000 Iterationen und zufälligem Salt.
+   * Die verschlüsselten Daten stehen unten im Script-Block mit der id pd-vault. Ohne Master-Passwort sind sie unlesbar.
+   * Master-Passwort vergessen = Daten verloren. Es gibt keine Hintertür.
+-->
+<style>
+:root{
+  --bg:#0b1020; --bg2:#10172e; --panel:rgba(255,255,255,.035); --panel2:rgba(255,255,255,.06);
+  --line:rgba(255,255,255,.08); --line2:rgba(255,255,255,.14);
+  --text:#e8ecf8; --muted:#8e98b8; --faint:#5d6788;
+  --accent:#6c8cff; --accent2:#a77bff; --good:#22c3a6; --warn:#f5a524; --bad:#ff5d73;
+  --shadow:0 20px 60px rgba(0,0,0,.45); --r:16px;
+  --mono:ui-monospace,"Cascadia Code","SF Mono",Consolas,monospace;
+  color-scheme:dark;
+}
+:root[data-theme="light"]{
+  --bg:#f3f5fb; --bg2:#e9edf8; --panel:rgba(255,255,255,.75); --panel2:#fff;
+  --line:rgba(20,30,70,.09); --line2:rgba(20,30,70,.16);
+  --text:#18203a; --muted:#5c6688; --faint:#97a0bd; --shadow:0 20px 50px rgba(30,40,90,.15);
+  color-scheme:light;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]):not([data-theme="light"])[data-auto="1"]{
+    --bg:#f3f5fb; --bg2:#e9edf8; --panel:rgba(255,255,255,.75); --panel2:#fff;
+    --line:rgba(20,30,70,.09); --line2:rgba(20,30,70,.16);
+    --text:#18203a; --muted:#5c6688; --faint:#97a0bd; --shadow:0 20px 50px rgba(30,40,90,.15);
+    color-scheme:light;
+  }
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{
+  font:15px/1.45 "Segoe UI Variable","Segoe UI",system-ui,-apple-system,Roboto,sans-serif;
+  color:var(--text); background:var(--bg);
+  background-image:radial-gradient(1200px 600px at 10% -10%,rgba(108,140,255,.18),transparent 60%),
+                   radial-gradient(900px 500px at 110% 10%,rgba(167,123,255,.14),transparent 60%);
+  background-attachment:fixed; -webkit-font-smoothing:antialiased;
+}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer;border:0;background:none}
+svg.i{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.hidden{display:none!important}
+::selection{background:rgba(108,140,255,.35)}
+::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:var(--line2);border-radius:10px;border:3px solid transparent;background-clip:padding-box}
+
+/* Buttons & Inputs */
+.btn{display:inline-flex;align-items:center;gap:8px;padding:10px 16px;border-radius:12px;background:var(--panel2);border:1px solid var(--line);font-weight:600;transition:.15s}
+.btn:hover{border-color:var(--line2);transform:translateY(-1px)}
+.btn.primary{background:linear-gradient(135deg,var(--accent),var(--accent2));border:0;color:#fff;box-shadow:0 8px 24px rgba(108,140,255,.35)}
+.btn.danger{background:rgba(255,93,115,.12);border-color:rgba(255,93,115,.35);color:var(--bad)}
+.btn.ghost{background:none;border-color:transparent}
+.btn.sm{padding:7px 11px;font-size:13px;border-radius:10px}
+.btn:disabled{opacity:.5;pointer-events:none}
+.ib{display:inline-grid;place-items:center;width:36px;height:36px;border-radius:10px;color:var(--muted);transition:.15s}
+.ib:hover{background:var(--panel2);color:var(--text)}
+.ib.on{color:var(--warn)}
+.field{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
+.field label{font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.inp{width:100%;padding:11px 14px;border-radius:12px;border:1px solid var(--line2);background:rgba(0,0,0,.18);outline:none;transition:.15s}
+:root[data-theme="light"] .inp{background:#fff}
+.inp:focus{border-color:var(--accent);box-shadow:0 0 0 4px rgba(108,140,255,.18)}
+textarea.inp{min-height:110px;resize:vertical;font-family:var(--mono);font-size:13px}
+.inp.mono{font-family:var(--mono)}
+.row{display:flex;gap:8px;align-items:center}
+.row>.grow{flex:1;min-width:0}
+.muted{color:var(--muted)} .small{font-size:13px}
+
+/* Auth screens */
+.auth{min-height:100%;display:grid;place-items:center;padding:24px 16px}
+.auth-card{width:100%;max-width:440px;background:var(--panel);border:1px solid var(--line);border-radius:24px;padding:34px 30px;box-shadow:var(--shadow);backdrop-filter:blur(20px)}
+.logo{display:flex;align-items:center;gap:12px;font-weight:800;font-size:20px;letter-spacing:-.01em}
+.logo .mark{width:42px;height:42px;border-radius:13px;display:grid;place-items:center;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;box-shadow:0 8px 24px rgba(108,140,255,.4)}
+.logo .mark svg.i{width:22px;height:22px}
+.auth h1{font-size:26px;margin:26px 0 6px;letter-spacing:-.02em}
+.auth p{margin:0 0 22px;color:var(--muted)}
+.auth .btn.primary{width:100%;justify-content:center;padding:13px}
+.auth .foot{margin-top:18px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.linkbtn{color:var(--accent);font-weight:600;font-size:13px}
+.linkbtn:hover{text-decoration:underline}
+.err{color:var(--bad);font-size:13px;min-height:18px;margin:-4px 0 10px}
+.shake{animation:shake .4s}
+@keyframes shake{20%,60%{transform:translateX(-8px)}40%,80%{transform:translateX(8px)}}
+.importbox{display:flex;gap:12px;align-items:center;padding:12px 14px;border-radius:14px;background:rgba(34,195,166,.1);border:1px solid rgba(34,195,166,.3);margin-bottom:18px;font-size:14px}
+.importbox b{color:var(--good)}
+.meter{height:6px;border-radius:6px;background:var(--line);overflow:hidden;margin-top:8px}
+.meter>i{display:block;height:100%;width:0;border-radius:6px;transition:.25s}
+.meter-l{font-size:12px;margin-top:5px;color:var(--muted)}
+.spinner{width:18px;height:18px;border:2.5px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* App layout */
+.app{display:grid;grid-template-rows:auto 1fr;height:100%}
+.top{display:flex;align-items:center;gap:14px;padding:12px 18px;border-bottom:1px solid var(--line);background:rgba(11,16,32,.55);backdrop-filter:blur(16px);position:relative;z-index:5}
+:root[data-theme="light"] .top{background:rgba(255,255,255,.6)}
+.top .logo{font-size:17px}.top .logo .mark{width:34px;height:34px;border-radius:11px}
+.search{flex:1;max-width:560px;margin:0 auto;position:relative}
+.search svg.i{position:absolute;left:13px;top:50%;transform:translateY(-50%);color:var(--faint)}
+.search .inp{padding-left:40px;background:var(--panel)}
+.search kbd{position:absolute;right:10px;top:50%;transform:translateY(-50%);font:11px var(--mono);color:var(--faint);border:1px solid var(--line2);padding:2px 6px;border-radius:6px}
+.status{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;white-space:nowrap}
+.status .dot{width:8px;height:8px;border-radius:50%;background:var(--good)}
+.status.dirty .dot{background:var(--warn);box-shadow:0 0 0 4px rgba(245,165,36,.18)}
+.main{display:grid;grid-template-columns:250px 360px 1fr;min-height:0}
+.side{border-right:1px solid var(--line);padding:16px 12px;overflow:auto;display:flex;flex-direction:column;gap:2px}
+.side h4{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);margin:16px 10px 6px}
+.nav{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:11px;color:var(--muted);font-weight:500;text-align:left;width:100%;transition:.12s}
+.nav:hover{background:var(--panel2);color:var(--text)}
+.nav.act{background:var(--panel2);color:var(--text);box-shadow:inset 3px 0 0 var(--c,var(--accent))}
+.nav .em{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;font-size:15px;background:color-mix(in srgb,var(--c,var(--accent)) 18%,transparent);flex:none}
+.nav .em svg.i{width:15px;height:15px;color:var(--c,var(--accent))}
+.nav .cnt{margin-left:auto;font-size:12px;color:var(--faint);font-variant-numeric:tabular-nums}
+.side .spacer{flex:1}
+.side .new{margin:10px 4px 0}
+.list{border-right:1px solid var(--line);overflow:auto;min-height:0}
+.list-h{position:sticky;top:0;z-index:2;padding:16px 18px 12px;display:flex;align-items:center;gap:10px;background:linear-gradient(var(--bg) 70%,transparent)}
+.list-h h2{margin:0;font-size:19px;letter-spacing:-.01em;flex:1;display:flex;gap:10px;align-items:center}
+.list-h .n{font-size:13px;color:var(--faint);font-weight:500}
+.item{display:flex;align-items:center;gap:12px;padding:11px 14px;margin:2px 8px;border-radius:13px;cursor:pointer;transition:.12s;border:1px solid transparent}
+.item:hover{background:var(--panel)}
+.item.act{background:var(--panel2);border-color:var(--line)}
+.av{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;font-weight:700;font-size:16px;color:#fff;flex:none;text-transform:uppercase;box-shadow:inset 0 0 0 1px rgba(255,255,255,.12)}
+.item .t{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item .s{font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item .meta{min-width:0;flex:1}
+.badge{font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:20px;letter-spacing:.02em;white-space:nowrap}
+.badge.rev{background:rgba(245,165,36,.15);color:var(--warn)}
+.badge.weak{background:rgba(255,93,115,.14);color:var(--bad)}
+.item .star{color:var(--warn)}
+.empty{padding:50px 26px;text-align:center;color:var(--muted)}
+.empty .big{font-size:42px;margin-bottom:10px}
+.detail{overflow:auto;min-height:0;padding:26px 34px 60px}
+.d-head{display:flex;gap:16px;align-items:center;margin-bottom:24px}
+.d-head .av{width:60px;height:60px;border-radius:18px;font-size:24px}
+.d-head h1{margin:0;font-size:26px;letter-spacing:-.02em;word-break:break-word}
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;padding:4px 10px;border-radius:20px;background:color-mix(in srgb,var(--c) 16%,transparent);color:color-mix(in srgb,var(--c) 80%,var(--text))}
+.d-actions{margin-left:auto;display:flex;gap:4px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;margin-bottom:16px}
+.fr{display:flex;align-items:center;gap:10px;padding:13px 16px;border-bottom:1px solid var(--line)}
+.fr:last-child{border-bottom:0}
+.fr .lbl{font-size:11.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);margin-bottom:2px}
+.fr .val{word-break:break-all;font-size:15px}
+.fr .val.mono{font-family:var(--mono);font-size:14.5px;letter-spacing:.02em}
+.fr .val a{color:var(--accent);text-decoration:none}
+.fr .acts{display:flex;gap:2px;margin-left:auto}
+.pw .d{color:#7fb2ff}.pw .s{color:#ff9f6e}
+:root[data-theme="light"] .pw .d{color:#2457d6}:root[data-theme="light"] .pw .s{color:#c2410c}
+.notes{white-space:pre-wrap;font-family:var(--mono);font-size:13px;padding:14px 16px;word-break:break-word;max-height:420px;overflow:auto}
+.sect{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin:22px 2px 8px}
+.meta-l{font-size:12.5px;color:var(--faint);display:flex;flex-wrap:wrap;gap:4px 18px;margin-top:20px}
+.alert{display:flex;gap:12px;align-items:flex-start;padding:13px 15px;border-radius:14px;margin-bottom:16px;font-size:14px}
+.alert.warn{background:rgba(245,165,36,.1);border:1px solid rgba(245,165,36,.3)}
+.alert.info{background:rgba(108,140,255,.1);border:1px solid rgba(108,140,255,.28)}
+.alert.bad{background:rgba(255,93,115,.1);border:1px solid rgba(255,93,115,.3)}
+.alert svg.i{margin-top:1px}
+.alert.warn svg.i{color:var(--warn)}.alert.info svg.i{color:var(--accent)}.alert.bad svg.i{color:var(--bad)}
+.alert .grow{flex:1}
+.back{display:none}
+
+/* Modal */
+.overlay{position:fixed;inset:0;background:rgba(5,8,18,.6);backdrop-filter:blur(6px);display:grid;place-items:center;padding:16px;z-index:50;animation:fade .15s}
+.modal{width:100%;max-width:520px;max-height:calc(100vh - 32px);overflow:auto;background:var(--bg2);border:1px solid var(--line2);border-radius:22px;box-shadow:var(--shadow);padding:24px 24px 20px;animation:pop .18s}
+.modal.wide{max-width:720px}
+.modal h2{margin:0 0 4px;font-size:21px;letter-spacing:-.01em}
+.modal .sub{color:var(--muted);margin:0 0 18px;font-size:14px}
+.modal .btns{display:flex;justify-content:flex-end;gap:8px;margin-top:20px;flex-wrap:wrap}
+@keyframes fade{from{opacity:0}}@keyframes pop{from{transform:scale(.96);opacity:0}}
+.cf{display:grid;grid-template-columns:1fr 1.4fr auto auto;gap:8px;align-items:center;margin-bottom:8px}
+.cf .inp{padding:9px 12px}
+.chk{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--muted);cursor:pointer;user-select:none}
+.chk input{accent-color:var(--accent);width:16px;height:16px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+.menu{position:absolute;right:16px;top:60px;background:var(--bg2);border:1px solid var(--line2);border-radius:16px;box-shadow:var(--shadow);padding:6px;min-width:260px;z-index:20;animation:pop .12s}
+.menu button{display:flex;gap:11px;align-items:center;width:100%;padding:10px 12px;border-radius:10px;text-align:left;font-weight:500}
+.menu button:hover{background:var(--panel2)}
+.menu hr{border:0;border-top:1px solid var(--line);margin:6px}
+.gen-out{font:600 20px/1.4 var(--mono);padding:18px;border-radius:14px;background:rgba(0,0,0,.25);border:1px solid var(--line);word-break:break-all;text-align:center;min-height:68px;margin-bottom:6px}
+:root[data-theme="light"] .gen-out{background:#fff}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.stat{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px}
+.stat div{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;text-align:center}
+.stat b{display:block;font-size:26px;letter-spacing:-.02em}
+.stat span{font-size:12px;color:var(--muted)}
+.slist button{display:flex;width:100%;gap:10px;align-items:center;padding:9px 10px;border-radius:10px;text-align:left}
+.slist button:hover{background:var(--panel2)}
+.catrow{display:grid;grid-template-columns:54px 1fr 46px auto;gap:8px;align-items:center;margin-bottom:8px}
+.catrow .inp{padding:9px 10px}
+.catrow input[type=color]{width:46px;height:40px;border:1px solid var(--line2);border-radius:10px;background:none;padding:3px}
+.toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:11px 18px;border-radius:12px;font-weight:600;font-size:14px;box-shadow:var(--shadow);z-index:99;animation:pop .15s;display:flex;gap:8px;align-items:center}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:14px}
+.kv dt{color:var(--muted)}.kv dd{margin:0}
+.prose p,.prose li{color:var(--muted);font-size:14px}.prose b{color:var(--text)}
+.prose h3{font-size:15px;margin:18px 0 6px}
+
+/* Responsive */
+@media (max-width:1100px){.main{grid-template-columns:210px 300px 1fr}.detail{padding:22px}}
+@media (max-width:820px){
+  .top{padding:10px 12px;gap:8px;flex-wrap:wrap}
+  .top .logo span,.search kbd,.status .txt{display:none}
+  .search{order:3;flex-basis:100%;max-width:none}
+  .main{grid-template-columns:1fr;grid-template-rows:auto 1fr}
+  .side{flex-direction:row;overflow-x:auto;border-right:0;border-bottom:1px solid var(--line);padding:8px 10px;gap:6px}
+  .side h4,.side .spacer,.side .new,.nav .cnt{display:none}
+  .nav{width:auto;white-space:nowrap;padding:7px 12px 7px 7px;border:1px solid var(--line)}
+  .nav.act{box-shadow:none;border-color:var(--c,var(--accent))}
+  .list{border-right:0}
+  .detail{display:none;padding:16px 16px 60px}
+  .app.show-detail .list{display:none}
+  .app.show-detail .detail{display:block}
+  .back{display:inline-grid}
+  .d-head .av{width:48px;height:48px;font-size:19px}
+  .d-head h1{font-size:21px}
+  .stat{grid-template-columns:repeat(2,1fr)}
+  .cf{grid-template-columns:1fr 1fr;}
+  .grid2{grid-template-columns:1fr}
+  .modal{padding:20px 16px 16px;border-radius:18px}
+  .desk{display:none}
+  .fab{position:fixed;right:18px;bottom:22px;width:58px;height:58px;border-radius:18px;z-index:10;display:grid;place-items:center;padding:0}
+  .fab svg.i{width:24px;height:24px}
+  .app.show-detail .fab{display:none}
+}
+@media (min-width:821px){.fab{display:none}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<!-- Verschlüsselter Tresor (AES-256-GCM). Wird beim Speichern ersetzt. -->
+<script type="application/json" id="pd-vault"></script>
+<!-- Einmaliger Erst-Import. Wird beim ersten Speichern geleert. -->
+<script type="application/json" id="pd-import"></script>
+<script>
+'use strict';
+/* ====== Grundlagen ====== */
+const SOURCE = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+const APP_VERSION = '1.0.0';
+const ITER = 600000;
+const AAD = new TextEncoder().encode('passwortdepot-v1');
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const enc = new TextEncoder(), dec = new TextDecoder();
+const b64 = buf => { let s = ''; const a = new Uint8Array(buf); for (let i = 0; i < a.length; i += 0x8000) s += String.fromCharCode.apply(null, a.subarray(i, i + 0x8000)); return btoa(s); };
+const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const uid = () => [...crypto.getRandomValues(new Uint8Array(8))].map(b => b.toString(16).padStart(2, '0')).join('');
+const now = () => new Date().toISOString();
+const fmtDate = s => { try { return new Date(s).toLocaleDateString('de-DE', {day:'2-digit', month:'2-digit', year:'numeric'}); } catch { return ''; } };
+function readJSON(id) { const el = document.getElementById(id); const t = el && el.textContent.trim(); if (!t) return null; try { return JSON.parse(t); } catch { return null; } }
+
+const ICONS = {
+  search:'<circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>',
+  plus:'<path d="M12 5v14M5 12h14"/>',
+  lock:'<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  copy:'<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  eye:'<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>',
+  eyeoff:'<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><path d="M1 1l22 22"/>',
+  edit:'<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+  trash:'<path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/>',
+  star:'<path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/>',
+  ext:'<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14 21 3"/>',
+  shield:'<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+  refresh:'<path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>',
+  save:'<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/>',
+  more:'<circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/>',
+  back:'<path d="M15 18l-6-6 6-6"/>',
+  check:'<path d="M20 6 9 17l-5-5"/>',
+  alert:'<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/>',
+  folder:'<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
+  download:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
+  upload:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>',
+  x:'<path d="M18 6 6 18M6 6l12 12"/>',
+  sliders:'<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
+  key:'<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/>',
+  grid:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/>',
+  info:'<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
+  tag:'<path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><path d="M7 7h.01"/>',
+  dice:'<rect x="3" y="3" width="18" height="18" rx="4"/><path d="M8 8h.01M16 8h.01M12 12h.01M8 16h.01M16 16h.01"/>'
+};
+const ic = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24">${ICONS[n] || ''}</svg>`;
+
+const DEFAULT_CATS = [
+  {id:'privat',  name:'Privat',  emoji:'🏠', color:'#6c8cff'},
+  {id:'arbeit',  name:'Arbeit',  emoji:'💼', color:'#f5a524'},
+  {id:'familie', name:'Familie', emoji:'👨‍👩‍👧', color:'#ff6b9a'},
+  {id:'kinder',  name:'Kinder',  emoji:'🧸', color:'#22c3a6'},
+  {id:'schule',  name:'Schule',  emoji:'🎒', color:'#a77bff'}
+];
+const blankData = () => ({version:1, categories:DEFAULT_CATS.map(c => ({...c})), entries:[], settings:{autolock:5, clip:30, theme:'auto'}, created:now()});
+
+/* ====== Krypto ====== */
+const Vault = {
+  async derive(pw, salt, iter) {
+    const base = await crypto.subtle.importKey('raw', enc.encode(pw), 'PBKDF2', false, ['deriveKey']);
+    return crypto.subtle.deriveKey({name:'PBKDF2', salt, iterations:iter, hash:'SHA-256'}, base, {name:'AES-GCM', length:256}, false, ['encrypt', 'decrypt']);
+  },
+  async seal(key, salt, iter, obj) {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = await crypto.subtle.encrypt({name:'AES-GCM', iv, additionalData:AAD}, key, enc.encode(JSON.stringify(obj)));
+    return {format:'passwortdepot', v:1, cipher:'AES-256-GCM', kdf:{name:'PBKDF2-SHA256', iter, salt:b64(salt)}, iv:b64(iv), data:b64(ct), saved:now()};
+  },
+  async open(pw, blob) {
+    const salt = unb64(blob.kdf.salt), iter = blob.kdf.iter;
+    const key = await this.derive(pw, salt, iter);
+    const pt = await crypto.subtle.decrypt({name:'AES-GCM', iv:unb64(blob.iv), additionalData:AAD}, key, unb64(blob.data));
+    return {key, salt, iter, data:JSON.parse(dec.decode(pt))};
+  }
+};
+
+/* ====== Passwortstärke & Generator ====== */
+const COMMON = /^(passwort|password|123456|12345678|qwertz|qwerty|hallo|abc123|111111|iloveyou|admin|welcome|letmein|000000)/i;
+function strength(pw) {
+  if (!pw) return {score:0, bits:0, label:'leer'};
+  let pool = 0;
+  if (/[a-z]/.test(pw)) pool += 26; if (/[A-Z]/.test(pw)) pool += 26; if (/\d/.test(pw)) pool += 10; if (/[^a-zA-Z0-9]/.test(pw)) pool += 33;
+  let bits = pw.length * Math.log2(Math.max(pool, 1));
+  if (/^(.)\1+$/.test(pw)) bits = 4;
+  if (COMMON.test(pw)) bits = Math.min(bits, 15);
+  if (/^\d+$/.test(pw)) bits = Math.min(bits, pw.length * 3.32);
+  if (/(.)\1\1/.test(pw)) bits *= .85;
+  const score = bits < 28 ? 0 : bits < 40 ? 1 : bits < 60 ? 2 : bits < 80 ? 3 : 4;
+  return {score, bits:Math.round(bits), label:['sehr schwach', 'schwach', 'mittel', 'stark', 'sehr stark'][score]};
+}
+const SCOLORS = ['#ff5d73', '#ff8a5d', '#f5a524', '#7bd88f', '#22c3a6'];
+function meterHTML(pw) { const s = strength(pw); return `<div class="meter"><i style="width:${pw ? (s.score + 1) * 20 : 0}%;background:${SCOLORS[s.score]}"></i></div><div class="meter-l">${pw ? `Stärke: <b style="color:${SCOLORS[s.score]}">${s.label}</b> · ca. ${s.bits} Bit` : '&nbsp;'}</div>`; }
+function randInt(max) { const lim = Math.floor(0x100000000 / max) * max; const a = new Uint32Array(1); do crypto.getRandomValues(a); while (a[0] >= lim); return a[0] % max; }
+function generate(o) {
+  const amb = /[Il1O0o]/g;
+  const sets = [];
+  if (o.lower) sets.push('abcdefghijkmnopqrstuvwxyz' + (o.amb ? '' : 'lo'));
+  if (o.upper) sets.push('ABCDEFGHJKLMNPQRSTUVWXYZ' + (o.amb ? '' : 'IO'));
+  if (o.digits) sets.push('23456789' + (o.amb ? '' : '01'));
+  if (o.symbols) sets.push('!#$%&*+-=?@^_.:;~');
+  if (!sets.length) return '';
+  const all = sets.join('');
+  let out;
+  do { out = Array.from({length:o.len}, () => all[randInt(all.length)]).join(''); }
+  while (!sets.every(s => [...out].some(ch => s.includes(ch))) && o.len >= sets.length);
+  return out;
+}
+const pwHTML = pw => [...String(pw ?? '')].map(ch => /\d/.test(ch) ? `<span class="d">${ch}</span>` : /\p{L}/u.test(ch) ? esc(ch) : `<span class="s">${esc(ch)}</span>`).join('');
+
+/* ====== Zustand ====== */
+const S = {
+  blob: readJSON('pd-vault'),
+  pending: readJSON('pd-import'),
+  key: null, salt: null, iter: ITER, data: null,
+  v: {cat:'all', q:'', sel:null, reveal:{}},
+  dirty: false, handle: null, saving: false, saveTimer: null, idle: null
+};
+const cat = id => S.data.categories.find(c => c.id === id) || {id, name:'Ohne Bereich', emoji:'📁', color:'#8e98b8'};
+function hue(str) { let h = 0; for (const ch of str) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h % 360; }
+const avatar = (e, sz) => `<div class="av" style="${sz ? `width:${sz}px;height:${sz}px;font-size:${Math.round(sz * .43)}px;border-radius:${Math.round(sz * .3)}px;` : ''}background:linear-gradient(135deg,hsl(${hue(e.title)} 65% 55%),hsl(${(hue(e.title) + 40) % 360} 70% 45%))">${esc((e.title.match(/[\p{L}\p{N}]/u) || ['?'])[0])}</div>`;
+
+/* ====== Theme ====== */
+function applyTheme() {
+  const t = S.data?.settings?.theme || 'auto';
+  document.documentElement.dataset.auto = t === 'auto' ? '1' : '0';
+  if (t === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
+}
+applyTheme();
+
+/* ====== Toast ====== */
+let toastT;
+function toast(msg, icon = 'check') { $('.toast')?.remove(); const t = document.createElement('div'); t.className = 'toast'; t.innerHTML = ic(icon) + esc(msg); document.body.appendChild(t); clearTimeout(toastT); toastT = setTimeout(() => t.remove(), 2400); }
+
+/* ====== Modal ====== */
+function closeModal() { $('.overlay')?.remove(); }
+function modal(html, {wide = false, onClose} = {}) {
+  closeModal();
+  const o = document.createElement('div'); o.className = 'overlay';
+  o.innerHTML = `<div class="modal ${wide ? 'wide' : ''}" role="dialog" aria-modal="true">${html}</div>`;
+  document.body.appendChild(o);
+  o.addEventListener('mousedown', e => { if (e.target === o) { closeModal(); onClose && onClose(); } });
+  const f = o.querySelector('[autofocus]'); f && setTimeout(() => f.focus(), 30);
+  return o.firstElementChild;
+}
+function confirmBox(title, text, okLabel = 'OK', danger = false) {
+  return new Promise(res => {
+    const m = modal(`<h2>${esc(title)}</h2><p class="sub">${text}</p><div class="btns"><button class="btn" data-x="0">Abbrechen</button><button class="btn ${danger ? 'danger' : 'primary'}" data-x="1" autofocus>${esc(okLabel)}</button></div>`, {onClose:() => res(false)});
+    m.addEventListener('click', e => { const b = e.target.closest('[data-x]'); if (b) { closeModal(); res(b.dataset.x === '1'); } });
+  });
+}
+
+/* ====== Startbildschirme ====== */
+function boot() {
+  if (S.blob) renderLock(); else renderSetup();
+}
+
+function renderSetup() {
+  const n = Array.isArray(S.pending) ? S.pending.length : 0;
+  $('#app').innerHTML = `
+  <div class="auth"><form class="auth-card" id="f" autocomplete="off">
+    <div class="logo"><div class="mark">${ic('lock')}</div><span>Passwortdepot</span></div>
+    <h1>Neuen Tresor anlegen</h1>
+    <p>Lege ein Master-Passwort fest. Nur damit lässt sich dein Tresor öffnen. Es wird nirgends gespeichert, also gut merken.</p>
+    ${n ? `<div class="importbox">${ic('download')}<div><b>${n} Einträge</b> aus OneNote liegen bereit und werden beim Anlegen verschlüsselt übernommen.</div></div>` : ''}
+    <div class="field"><label for="p1">Master-Passwort</label><input class="inp" type="password" id="p1" autofocus autocomplete="new-password"><div id="m"></div></div>
+    <div class="field"><label for="p2">Wiederholen</label><input class="inp" type="password" id="p2" autocomplete="new-password"></div>
+    <div class="err" id="err"></div>
+    <button class="btn primary" id="go">${ic('shield')}Tresor verschlüsseln & öffnen</button>
+    <div class="foot"><span class="small muted">Tipp: 4–5 zufällige Wörter, nach dem Muster Wort-Wort-Wort-Wort-Zahl, aber eigene Wörter</span></div>
+    <div class="foot"><button type="button" class="linkbtn" id="openfile">Vorhandene Tresor-Datei öffnen</button><button type="button" class="linkbtn" id="about">Wie sicher ist das?</button></div>
+  </form></div>`;
+  const p1 = $('#p1'), p2 = $('#p2');
+  p1.addEventListener('input', () => $('#m').innerHTML = meterHTML(p1.value));
+  $('#m').innerHTML = meterHTML('');
+  $('#openfile').onclick = openVaultFile;
+  $('#about').onclick = showAbout;
+  $('#f').onsubmit = async e => {
+    e.preventDefault();
+    const err = $('#err');
+    if (p1.value.length < 10) return err.textContent = 'Bitte mindestens 10 Zeichen verwenden.';
+    if (strength(p1.value).score < 2) return err.textContent = 'Das Passwort ist zu schwach. Länger oder mit mehr Zeichenarten.';
+    if (p1.value !== p2.value) return err.textContent = 'Die beiden Eingaben stimmen nicht überein.';
+    busy($('#go'), true);
+    S.salt = crypto.getRandomValues(new Uint8Array(16)); S.iter = ITER;
+    S.key = await Vault.derive(p1.value, S.salt, S.iter);
+    p1.value = p2.value = '';
+    S.data = blankData();
+    if (n) S.data.entries = S.pending.map(x => ({...x, fields:x.fields || []}));
+    S.pending = null;
+    S.blob = await Vault.seal(S.key, S.salt, S.iter, S.data);
+    S.dirty = true;
+    renderMain();
+    firstSaveDialog(n);
+  };
+}
+
+function busy(btn, on) { if (!btn) return; btn.disabled = on; if (on) { btn.dataset.h = btn.innerHTML; btn.innerHTML = '<span class="spinner"></span>Einen Moment …'; } else if (btn.dataset.h) btn.innerHTML = btn.dataset.h; }
+
+function renderLock(msg) {
+  $('#app').innerHTML = `
+  <div class="auth"><form class="auth-card" id="f" autocomplete="off">
+    <div class="logo"><div class="mark">${ic('lock')}</div><span>Passwortdepot</span></div>
+    <h1>Willkommen zurück</h1>
+    <p>${msg ? esc(msg) : 'Dein Tresor ist verschlüsselt. Gib dein Master-Passwort ein.'}</p>
+    <div class="field"><label for="pw">Master-Passwort</label>
+      <div class="row"><input class="inp grow" type="password" id="pw" autofocus autocomplete="current-password"><button type="button" class="ib" id="tg" title="Anzeigen">${ic('eye')}</button></div></div>
+    <div class="err" id="err"></div>
+    <button class="btn primary" id="go">${ic('key')}Entsperren</button>
+    <div class="foot"><button type="button" class="linkbtn" id="openfile">Andere Tresor-Datei öffnen</button><button type="button" class="linkbtn" id="about">Wie sicher ist das?</button></div>
+    <div class="foot"><span class="small muted">Zuletzt gespeichert: ${S.blob?.saved ? new Date(S.blob.saved).toLocaleString('de-DE') : '–'}</span></div>
+  </form></div>`;
+  $('#tg').onclick = () => { const p = $('#pw'); p.type = p.type === 'password' ? 'text' : 'password'; $('#tg').innerHTML = ic(p.type === 'password' ? 'eye' : 'eyeoff'); };
+  $('#openfile').onclick = openVaultFile;
+  $('#about').onclick = showAbout;
+  $('#f').onsubmit = async e => {
+    e.preventDefault();
+    const pw = $('#pw').value; if (!pw) return;
+    busy($('#go'), true);
+    try {
+      const r = await Vault.open(pw, S.blob);
+      Object.assign(S, {key:r.key, salt:r.salt, iter:r.iter, data:r.data});
+      S.data.settings = Object.assign({autolock:5, clip:30, theme:'auto'}, S.data.settings);
+      S.v = {cat:'all', q:'', sel:null, reveal:{}};
+      applyTheme(); renderMain();
+    } catch {
+      busy($('#go'), false);
+      $('#err').textContent = 'Falsches Master-Passwort.';
+      $('#f').classList.remove('shake'); void $('#f').offsetWidth; $('#f').classList.add('shake');
+      $('#pw').select();
+    }
+  };
+}
+
+/* ====== Hauptansicht ====== */
+function renderMain() {
+  $('#app').innerHTML = `
+  <div class="app" id="shell">
+    <header class="top">
+      <div class="logo"><div class="mark">${ic('lock')}</div><span>Passwortdepot</span></div>
+      <div class="search">${ic('search')}<input class="inp" id="q" placeholder="Suchen in Titel, Benutzer, Link, Notizen …" autocomplete="off" spellcheck="false"><kbd>Strg F</kbd></div>
+      <div class="status" id="status"></div>
+      <button class="btn primary sm desk" data-a="new" title="Neuer Eintrag">${ic('plus')}Neu</button>
+      <button class="ib" data-a="save" title="Speichern (Strg+S)">${ic('save')}</button>
+      <button class="ib" data-a="lock" title="Sperren">${ic('lock')}</button>
+      <button class="ib" data-a="menu" title="Mehr">${ic('more')}</button>
+    </header>
+    <div class="main">
+      <nav class="side" id="side"></nav>
+      <section class="list" id="list"></section>
+      <section class="detail" id="detail"></section>
+    </div>
+    <button class="btn primary fab" data-a="new" title="Neuer Eintrag">${ic('plus')}</button>
+  </div>`;
+  $('#q').value = S.v.q;
+  $('#q').addEventListener('input', e => { S.v.q = e.target.value; renderList(); });
+  $('#shell').addEventListener('click', onClick);
+  renderSide(); renderList(); renderDetail(); renderStatus();
+  resetIdle();
+}
+
+function counts() {
+  const c = {all:S.data.entries.length, fav:0, review:0};
+  for (const e of S.data.entries) { c[e.cat] = (c[e.cat] || 0) + 1; if (e.fav) c.fav++; if (e.review) c.review++; }
+  return c;
+}
+function renderSide() {
+  const c = counts(), a = S.v.cat;
+  const nav = (id, em, name, color, n) => `<button class="nav ${a === id ? 'act' : ''}" data-a="cat" data-id="${esc(id)}" style="--c:${esc(color)}"><span class="em">${em}</span>${esc(name)}<span class="cnt">${n || 0}</span></button>`;
+  $('#side').innerHTML =
+    nav('all', ic('grid'), 'Alle Einträge', '#6c8cff', c.all) +
+    nav('fav', ic('star'), 'Favoriten', '#f5a524', c.fav) +
+    (c.review ? nav('review', ic('alert'), 'Zu prüfen', '#ff8a5d', c.review) : '') +
+    `<h4>Bereiche</h4>` +
+    S.data.categories.map(k => nav(k.id, esc(k.emoji), k.name, k.color, c[k.id])).join('') +
+    `<div class="spacer"></div><button class="btn sm ghost new" data-a="cats">${ic('sliders')}Bereiche verwalten</button>`;
+}
+function visible() {
+  const q = S.v.q.toLowerCase().trim(), a = S.v.cat;
+  return S.data.entries.filter(e => {
+    if (q) {
+      const hay = [e.title, e.username, e.url, e.notes, ...(e.fields || []).map(f => f.label + ' ' + (f.secret ? '' : f.value))].join(' ').toLowerCase();
+      return q.split(/\s+/).every(w => hay.includes(w));
+    }
+    if (a === 'all') return true; if (a === 'fav') return e.fav; if (a === 'review') return e.review;
+    return e.cat === a;
+  }).sort((x, y) => (y.fav - x.fav) || x.title.localeCompare(y.title, 'de', {sensitivity:'base'}));
+}
+function renderList() {
+  const L = visible(), a = S.v.cat;
+  const title = S.v.q ? 'Suche' : a === 'all' ? 'Alle Einträge' : a === 'fav' ? 'Favoriten' : a === 'review' ? 'Zu prüfen' : `${cat(a).emoji} ${cat(a).name}`;
+  $('#list').innerHTML = `<div class="list-h"><h2>${esc(title)} <span class="n">${L.length}</span></h2></div>` +
+    (L.length ? L.map(e => {
+      const weak = e.password && strength(e.password).score < 2;
+      return `<div class="item ${S.v.sel === e.id ? 'act' : ''}" data-a="sel" data-id="${e.id}">${avatar(e)}
+        <div class="meta"><div class="t">${esc(e.title)}</div><div class="s">${esc(e.username || (e.url ? e.url.replace(/^https?:\/\//, '') : '') || (S.v.q || a === 'all' || a === 'fav' || a === 'review' ? cat(e.cat).emoji + ' ' + cat(e.cat).name : '–'))}</div></div>
+        ${e.review ? '<span class="badge rev">prüfen</span>' : weak ? '<span class="badge weak">schwach</span>' : ''}
+        ${e.fav ? `<span class="star">${ic('star')}</span>` : ''}</div>`;
+    }).join('') : `<div class="empty"><div class="big">${S.v.q ? '🔍' : '🗂️'}</div>${S.v.q ? 'Nichts gefunden.' : 'Noch keine Einträge in diesem Bereich.'}<br><br><button class="btn sm" data-a="new">${ic('plus')}Eintrag anlegen</button></div>`);
+}
+function entry(id) { return S.data.entries.find(e => e.id === id); }
+function renderDetail() {
+  const e = entry(S.v.sel), d = $('#detail');
+  $('#shell').classList.toggle('show-detail', !!e);
+  if (!e) {
+    const c = counts();
+    d.innerHTML = `<div class="empty" style="padding-top:12vh"><div class="big">🔐</div><h2 style="margin:0 0 6px;color:var(--text)">${c.all} Einträge sicher verwahrt</h2>
+      <p>Wähle links einen Eintrag oder lege einen neuen an.</p>
+      ${c.review ? `<p><button class="btn sm" data-a="cat" data-id="review">${ic('alert')}${c.review} Einträge aus dem Import prüfen</button></p>` : ''}
+      <p><button class="btn sm ghost" data-a="audit">${ic('shield')}Sicherheitscheck öffnen</button></p></div>`;
+    return;
+  }
+  const k = cat(e.cat), rv = S.v.reveal;
+  const row = (lbl, inner, acts) => `<div class="fr"><div class="grow" style="min-width:0"><div class="lbl">${lbl}</div>${inner}</div><div class="acts">${acts}</div></div>`;
+  const cp = (key, t = 'Kopieren') => `<button class="ib" data-a="copy" data-k="${key}" title="${t}">${ic('copy')}</button>`;
+  const secretVal = (key, val) => rv[key] ? `<div class="val mono pw">${pwHTML(val)}</div>` : `<div class="val mono">${'•'.repeat(Math.min(Math.max(val.length, 8), 16))}</div>`;
+  const eyeBtn = key => `<button class="ib" data-a="reveal" data-k="${key}" title="${rv[key] ? 'Verbergen' : 'Anzeigen'}">${ic(rv[key] ? 'eyeoff' : 'eye')}</button>`;
+  let rows = '';
+  if (e.username) rows += row('Benutzer / E-Mail', `<div class="val">${esc(e.username)}</div>`, cp('username'));
+  if (e.password) {
+    const s = strength(e.password);
+    rows += row('Passwort', secretVal('password', e.password) + `<div class="meter-l" style="margin-top:3px">Stärke: <b style="color:${SCOLORS[s.score]}">${s.label}</b></div>`, eyeBtn('password') + cp('password'));
+  }
+  if (e.url) { const href = /^https?:\/\//i.test(e.url) ? e.url : 'https://' + e.url; rows += row('Webseite', `<div class="val"><a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(e.url)}</a></div>`, `<a class="ib" href="${esc(href)}" target="_blank" rel="noopener noreferrer" title="Öffnen">${ic('ext')}</a>` + cp('url')); }
+  (e.fields || []).forEach((f, i) => { rows += row(esc(f.label || 'Feld'), f.secret ? secretVal('f' + i, f.value) : `<div class="val">${esc(f.value)}</div>`, (f.secret ? eyeBtn('f' + i) : '') + cp('f' + i)); });
+  const dupes = e.password ? S.data.entries.filter(x => x !== e && x.password === e.password).length : 0;
+  d.innerHTML = `
+    <button class="btn sm ghost back" data-a="back" style="margin:-4px 0 10px -8px">${ic('back')}Zurück</button>
+    <div class="d-head">${avatar(e)}<div style="min-width:0"><h1>${esc(e.title)}</h1><span class="chip" style="--c:${esc(k.color)}">${esc(k.emoji)} ${esc(k.name)}</span></div>
+      <div class="d-actions"><button class="ib ${e.fav ? 'on' : ''}" data-a="fav" title="Favorit">${ic('star')}</button><button class="ib" data-a="edit" title="Bearbeiten">${ic('edit')}</button><button class="ib" data-a="del" title="Löschen">${ic('trash')}</button></div></div>
+    ${e.review ? `<div class="alert warn">${ic('alert')}<div class="grow">Aus OneNote übernommen, aber nicht eindeutig zuzuordnen. Bitte kurz prüfen, ob Benutzer und Passwort richtig stehen.</div><button class="btn sm" data-a="reviewed">${ic('check')}Passt</button></div>` : ''}
+    ${dupes ? `<div class="alert bad">${ic('alert')}<div class="grow">Dieses Passwort wird noch bei <b>${dupes}</b> weiteren Einträgen verwendet.</div></div>` : ''}
+    ${rows ? `<div class="card">${rows}</div>` : `<div class="alert info">${ic('info')}<div>Noch keine Zugangsdaten hinterlegt.</div></div>`}
+    ${e.notes ? `<div class="sect">Notizen</div><div class="card"><div class="notes">${esc(e.notes)}</div></div>` : ''}
+    <div class="meta-l"><span>Angelegt: ${fmtDate(e.created)}</span><span>Geändert: ${fmtDate(e.updated)}</span>${e.source ? `<span>Quelle: ${esc(e.source)}</span>` : ''}</div>`;
+}
+function renderStatus() {
+  const s = $('#status'); if (!s) return;
+  s.className = 'status' + (S.dirty ? ' dirty' : '');
+  s.innerHTML = `<span class="dot"></span><span class="txt">${S.saving ? 'Speichert …' : S.dirty ? (S.handle ? 'Wird gespeichert …' : 'Nicht gespeichert') : 'Gespeichert'}</span>`;
+}
+
+/* ====== Klicks ====== */
+async function onClick(ev) {
+  const b = ev.target.closest('[data-a]'); if (!b) return;
+  const a = b.dataset.a, e = entry(S.v.sel);
+  switch (a) {
+    case 'cat': S.v.cat = b.dataset.id; S.v.q = ''; $('#q').value = ''; S.v.sel = null; renderSide(); renderList(); renderDetail(); break;
+    case 'sel': S.v.sel = b.dataset.id; S.v.reveal = {}; renderList(); renderDetail(); $('#detail').scrollTop = 0; break;
+    case 'back': S.v.sel = null; renderList(); renderDetail(); break;
+    case 'new': editEntry(null); break;
+    case 'edit': editEntry(e); break;
+    case 'fav': e.fav = !e.fav; touch(e, false); break;
+    case 'reviewed': e.review = false; touch(e); toast('Als geprüft markiert'); break;
+    case 'del':
+      if (await confirmBox('Eintrag löschen?', `„${esc(e.title)}“ wird endgültig entfernt.`, 'Löschen', true)) {
+        S.data.entries = S.data.entries.filter(x => x !== e); S.v.sel = null; changed(); toast('Gelöscht', 'trash');
+      } break;
+    case 'reveal': S.v.reveal[b.dataset.k] = !S.v.reveal[b.dataset.k]; renderDetail(); break;
+    case 'copy': {
+      const k = b.dataset.k; const val = k.startsWith('f') && /^f\d+$/.test(k) ? e.fields[+k.slice(1)].value : e[k];
+      copy(val, k === 'username' || k === 'url' ? 'Kopiert' : `Kopiert · wird nach ${S.data.settings.clip} s geleert`, k !== 'username' && k !== 'url'); break;
+    }
+    case 'save': save(true); break;
+    case 'lock': lock(); break;
+    case 'menu': toggleMenu(b); break;
+    case 'cats': manageCats(); break;
+    case 'audit': audit(); break;
+  }
+}
+function touch(e, rerenderList = true) { e.updated = now(); changed(); }
+function changed() { S.dirty = true; renderSide(); renderList(); renderDetail(); renderStatus(); scheduleSave(); }
+
+let clipT;
+async function copy(val, msg = 'Kopiert', secret = false) {
+  try { await navigator.clipboard.writeText(val ?? ''); }
+  catch { const t = document.createElement('textarea'); t.value = val ?? ''; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); }
+  toast(msg, 'copy');
+  if (secret && S.data.settings.clip > 0) { clearTimeout(clipT); clipT = setTimeout(() => navigator.clipboard.writeText('').catch(() => {}), S.data.settings.clip * 1000); }
+}
+
+/* ====== Menü ====== */
+function toggleMenu() {
+  if ($('.menu')) return $('.menu').remove();
+  const m = document.createElement('div'); m.className = 'menu';
+  const it = (a, i, t) => `<button data-m="${a}">${ic(i)}${t}</button>`;
+  m.innerHTML = it('audit', 'shield', 'Sicherheitscheck') + it('gen', 'dice', 'Passwort-Generator') + it('cats', 'tag', 'Bereiche verwalten') + '<hr>' +
+    it('saveas', 'save', 'Speichern unter … (z. B. USB-Stick)') + it('backup', 'download', 'Verschlüsseltes Backup herunterladen') + it('importcsv', 'upload', 'CSV importieren') + it('exportcsv', 'download', 'Als CSV exportieren (unverschlüsselt)') + '<hr>' +
+    it('settings', 'sliders', 'Einstellungen') + it('master', 'key', 'Master-Passwort ändern') + it('about', 'info', 'Sicherheit & Transparenz');
+  $('.top').appendChild(m);
+  m.addEventListener('click', ev => {
+    const b = ev.target.closest('[data-m]'); if (!b) return; m.remove();
+    ({audit, gen:() => generatorModal(), cats:manageCats, saveas:() => save(true, true), backup:downloadBackup, importcsv:importCSV, exportcsv:exportCSV, settings, master:changeMaster, about:showAbout})[b.dataset.m]();
+  });
+  setTimeout(() => document.addEventListener('mousedown', function h(e) { if (!e.target.closest('.menu') && !e.target.closest('[data-a="menu"]')) { $('.menu')?.remove(); } document.removeEventListener('mousedown', h); }), 0);
+}
+
+/* ====== Eintrag bearbeiten ====== */
+function editEntry(e) {
+  const isNew = !e;
+  const x = e ? JSON.parse(JSON.stringify(e)) : {id:uid(), cat:['all', 'fav', 'review'].includes(S.v.cat) ? S.data.categories[0]?.id : S.v.cat, title:'', username:'', password:'', url:'', notes:'', fields:[], fav:false, review:false, created:now(), updated:now()};
+  const m = modal(`
+    <h2>${isNew ? 'Neuer Eintrag' : 'Eintrag bearbeiten'}</h2><p class="sub">${isNew ? 'Zugangsdaten sicher ablegen.' : esc(x.title)}</p>
+    <form id="ef" autocomplete="off">
+      <div class="grid2">
+        <div class="field"><label>Titel</label><input class="inp" name="title" value="${esc(x.title)}" placeholder="z. B. Amazon" autofocus required></div>
+        <div class="field"><label>Bereich</label><select class="inp" name="cat">${S.data.categories.map(c => `<option value="${esc(c.id)}" ${c.id === x.cat ? 'selected' : ''}>${esc(c.emoji)} ${esc(c.name)}</option>`).join('')}</select></div>
+      </div>
+      <div class="field"><label>Benutzer / E-Mail</label><input class="inp" name="username" value="${esc(x.username)}" spellcheck="false"></div>
+      <div class="field"><label>Passwort</label>
+        <div class="row"><input class="inp mono grow" name="password" type="password" value="${esc(x.password)}" spellcheck="false" autocomplete="new-password">
+        <button type="button" class="ib" id="eye" title="Anzeigen">${ic('eye')}</button><button type="button" class="ib" id="gen" title="Generieren">${ic('dice')}</button></div><div id="em"></div></div>
+      <div class="field"><label>Webseite</label><input class="inp" name="url" value="${esc(x.url)}" placeholder="https://" spellcheck="false"></div>
+      <div class="field"><label>Weitere Felder</label><div id="cfs"></div><button type="button" class="btn sm" id="addf" style="align-self:flex-start">${ic('plus')}Feld hinzufügen</button></div>
+      <div class="field"><label>Notizen</label><textarea class="inp" name="notes">${esc(x.notes)}</textarea></div>
+      <label class="chk"><input type="checkbox" name="fav" ${x.fav ? 'checked' : ''}> Als Favorit markieren</label>
+      <div class="btns"><button type="button" class="btn" id="cancel">Abbrechen</button><button class="btn primary">${ic('check')}Speichern</button></div>
+    </form>`, {wide:true});
+  const f = $('#ef', m), pw = f.password;
+  const meter = () => $('#em', m).innerHTML = meterHTML(pw.value);
+  meter(); pw.addEventListener('input', meter);
+  $('#eye', m).onclick = () => { pw.type = pw.type === 'password' ? 'text' : 'password'; $('#eye', m).innerHTML = ic(pw.type === 'password' ? 'eye' : 'eyeoff'); };
+  $('#gen', m).onclick = () => { pw.value = generate(genOpts()); pw.type = 'text'; $('#eye', m).innerHTML = ic('eyeoff'); meter(); };
+  const cfs = $('#cfs', m);
+  const addRow = (fl = {label:'', value:'', secret:false}) => {
+    const r = document.createElement('div'); r.className = 'cf';
+    r.innerHTML = `<input class="inp" data-f="label" placeholder="Bezeichnung" value="${esc(fl.label)}"><input class="inp ${fl.secret ? 'mono' : ''}" data-f="value" placeholder="Wert" value="${esc(fl.value)}" type="${fl.secret ? 'password' : 'text'}" spellcheck="false"><label class="chk" title="Geheim (verdeckt anzeigen)"><input type="checkbox" data-f="secret" ${fl.secret ? 'checked' : ''}>geheim</label><button type="button" class="ib" title="Entfernen">${ic('x')}</button>`;
+    r.querySelector('button').onclick = () => r.remove();
+    r.querySelector('[data-f=secret]').onchange = ev => { const v = r.querySelector('[data-f=value]'); v.type = ev.target.checked ? 'password' : 'text'; };
+    cfs.appendChild(r);
+  };
+  (x.fields || []).forEach(addRow);
+  $('#addf', m).onclick = () => addRow();
+  $('#cancel', m).onclick = closeModal;
+  f.onsubmit = ev => {
+    ev.preventDefault();
+    Object.assign(x, {title:f.title.value.trim() || 'Ohne Titel', cat:f.cat.value, username:f.username.value.trim(), password:pw.value, url:f.url.value.trim(), notes:f.notes.value, fav:f.fav.checked, updated:now()});
+    x.fields = $$('.cf', cfs).map(r => ({label:r.querySelector('[data-f=label]').value.trim(), value:r.querySelector('[data-f=value]').value, secret:r.querySelector('[data-f=secret]').checked})).filter(fl => fl.label || fl.value);
+    if (isNew) S.data.entries.push(x); else Object.assign(e, x);
+    S.v.sel = x.id; S.v.reveal = {};
+    if (isNew && !['all', 'fav', 'review'].includes(S.v.cat) && S.v.cat !== x.cat) S.v.cat = x.cat;
+    closeModal(); changed(); toast(isNew ? 'Eintrag angelegt' : 'Änderungen übernommen');
+  };
+}
+
+/* ====== Generator ====== */
+let GEN = {len:20, lower:true, upper:true, digits:true, symbols:true, amb:false};
+const genOpts = () => GEN;
+function generatorModal() {
+  const m = modal(`<h2>Passwort-Generator</h2><p class="sub">Echte Zufallszahlen aus dem Kryptografie-Modul des Browsers.</p>
+    <div class="gen-out pw" id="out"></div><div id="gm"></div>
+    <div class="field" style="margin-top:14px"><label>Länge: <span id="lv">${GEN.len}</span></label><input type="range" min="8" max="64" value="${GEN.len}" id="len"></div>
+    <div class="row" style="flex-wrap:wrap;gap:16px">
+      <label class="chk"><input type="checkbox" id="lower" ${GEN.lower ? 'checked' : ''}>a–z</label><label class="chk"><input type="checkbox" id="upper" ${GEN.upper ? 'checked' : ''}>A–Z</label>
+      <label class="chk"><input type="checkbox" id="digits" ${GEN.digits ? 'checked' : ''}>0–9</label><label class="chk"><input type="checkbox" id="symbols" ${GEN.symbols ? 'checked' : ''}>!#$%</label>
+      <label class="chk"><input type="checkbox" id="amb" ${GEN.amb ? 'checked' : ''}>auch I, l, 1, O, 0</label></div>
+    <div class="btns"><button class="btn" id="re">${ic('refresh')}Neu</button><button class="btn primary" id="cp">${ic('copy')}Kopieren</button></div>`);
+  let cur = '';
+  const run = () => { cur = generate(GEN); $('#out', m).innerHTML = pwHTML(cur) || '<span class="muted">Mindestens eine Zeichenart wählen</span>'; $('#gm', m).innerHTML = meterHTML(cur); $('#lv', m).textContent = GEN.len; };
+  $('#len', m).oninput = ev => { GEN.len = +ev.target.value; run(); };
+  ['lower', 'upper', 'digits', 'symbols', 'amb'].forEach(k => $('#' + k, m).onchange = ev => { GEN[k] = ev.target.checked; run(); });
+  $('#re', m).onclick = run; $('#cp', m).onclick = () => copy(cur, 'Kopiert', true);
+  run();
+}
+
+/* ====== Bereiche ====== */
+function manageCats() {
+  const m = modal(`<h2>Bereiche verwalten</h2><p class="sub">Eigene Bereiche anlegen, umbenennen, Symbol und Farbe wählen.</p>
+    <div id="cl"></div><div class="alert info hidden" id="cnote"></div><button class="btn sm" id="add">${ic('plus')}Bereich hinzufügen</button>
+    <div class="btns"><button class="btn" id="cancel">Abbrechen</button><button class="btn primary" id="ok">${ic('check')}Übernehmen</button></div>`, {wide:true});
+  const cl = $('#cl', m), c = counts();
+  const addRow = k => {
+    const r = document.createElement('div'); r.className = 'catrow'; r.dataset.id = k.id;
+    r.innerHTML = `<input class="inp" data-f="emoji" value="${esc(k.emoji)}" maxlength="8" style="text-align:center;font-size:18px"><input class="inp" data-f="name" value="${esc(k.name)}" placeholder="Name"><input type="color" data-f="color" value="${esc(k.color)}"><button class="ib" title="Entfernen">${ic('trash')}</button>`;
+    r.querySelector('button').onclick = () => {
+      r.remove();
+      if (c[k.id]) $('#cnote', m).innerHTML = `${ic('info')}<div>Einträge aus entfernten Bereichen landen beim Übernehmen im ersten Bereich der Liste.</div>`, $('#cnote', m).classList.remove('hidden');
+    };
+    cl.appendChild(r);
+  };
+  S.data.categories.forEach(addRow);
+  $('#add', m).onclick = () => addRow({id:'c' + uid(), name:'', emoji:'📁', color:'#' + [...crypto.getRandomValues(new Uint8Array(3))].map(b => (b | 0x40).toString(16).padStart(2, '0')).join('')});
+  $('#cancel', m).onclick = closeModal;
+  $('#ok', m).onclick = () => {
+    const rows = $$('.catrow', cl);
+    const cats = rows.map(r => ({id:r.dataset.id, emoji:r.querySelector('[data-f=emoji]').value.trim() || '📁', name:r.querySelector('[data-f=name]').value.trim() || 'Ohne Namen', color:r.querySelector('[data-f=color]').value}));
+    if (!cats.length) return toast('Mindestens ein Bereich wird benötigt', 'alert');
+    const ids = new Set(cats.map(k => k.id));
+    S.data.entries.forEach(e => { if (!ids.has(e.cat)) e.cat = cats[0].id; });
+    S.data.categories = cats;
+    if (!['all', 'fav', 'review'].includes(S.v.cat) && !ids.has(S.v.cat)) S.v.cat = 'all';
+    closeModal(); changed(); toast('Bereiche gespeichert');
+  };
+}
+
+/* ====== Sicherheitscheck ====== */
+function audit() {
+  const E = S.data.entries.filter(e => e.password);
+  const weak = E.filter(e => strength(e.password).score < 2);
+  const groups = {}; E.forEach(e => (groups[e.password] = groups[e.password] || []).push(e));
+  const reused = Object.values(groups).filter(g => g.length > 1);
+  const reusedN = reused.reduce((s, g) => s + g.length, 0);
+  const old = E.filter(e => Date.now() - new Date(e.updated).getTime() > 3 * 365 * 864e5);
+  const li = e => `<button data-id="${e.id}">${avatar(e, 30)}<span class="grow">${esc(e.title)}</span><span class="small muted">${esc(cat(e.cat).emoji)}</span></button>`;
+  const m = modal(`<h2>Sicherheitscheck</h2><p class="sub">Wird nur lokal berechnet. Nichts verlässt deinen Rechner.</p>
+    <div class="stat"><div><b>${S.data.entries.length}</b><span>Einträge</span></div><div><b style="color:${weak.length ? 'var(--bad)' : 'var(--good)'}">${weak.length}</b><span>schwach</span></div>
+    <div><b style="color:${reusedN ? 'var(--warn)' : 'var(--good)'}">${reusedN}</b><span>mehrfach genutzt</span></div><div><b>${old.length}</b><span>älter als 3 Jahre</span></div></div>
+    ${weak.length ? `<div class="sect">Schwache Passwörter</div><div class="slist card" style="padding:4px">${weak.map(li).join('')}</div>` : ''}
+    ${reused.length ? `<div class="sect">Mehrfach verwendet (${reused.length} Gruppen)</div>${reused.map(g => `<div class="slist card" style="padding:4px">${g.map(li).join('')}</div>`).join('')}` : ''}
+    ${!weak.length && !reused.length ? `<div class="alert info">${ic('check')}<div>Sieht gut aus. Keine schwachen oder doppelten Passwörter.</div></div>` : ''}
+    <div class="btns"><button class="btn primary" id="ok">Schließen</button></div>`, {wide:true});
+  $('#ok', m).onclick = closeModal;
+  m.addEventListener('click', ev => { const b = ev.target.closest('.slist [data-id]'); if (b) { closeModal(); S.v.sel = b.dataset.id; S.v.cat = 'all'; S.v.q = ''; $('#q').value = ''; renderSide(); renderList(); renderDetail(); } });
+}
+
+/* ====== Einstellungen ====== */
+function settings() {
+  const st = S.data.settings;
+  const m = modal(`<h2>Einstellungen</h2><p class="sub">Werden verschlüsselt im Tresor gespeichert.</p>
+    <div class="field"><label>Automatisch sperren nach</label><select class="inp" id="al">${[1, 2, 5, 10, 15, 30, 0].map(v => `<option value="${v}" ${st.autolock === v ? 'selected' : ''}>${v ? v + ' Minuten Inaktivität' : 'nie (nicht empfohlen)'}</option>`).join('')}</select></div>
+    <div class="field"><label>Zwischenablage leeren nach</label><select class="inp" id="cl">${[15, 30, 60, 120, 0].map(v => `<option value="${v}" ${st.clip === v ? 'selected' : ''}>${v ? v + ' Sekunden' : 'nie'}</option>`).join('')}</select></div>
+    <div class="field"><label>Darstellung</label><select class="inp" id="th">${[['auto', 'Wie System'], ['dark', 'Dunkel'], ['light', 'Hell']].map(([v, l]) => `<option value="${v}" ${st.theme === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    <div class="btns"><button class="btn" id="cancel">Abbrechen</button><button class="btn primary" id="ok">${ic('check')}Übernehmen</button></div>`);
+  $('#cancel', m).onclick = closeModal;
+  $('#ok', m).onclick = () => { st.autolock = +$('#al', m).value; st.clip = +$('#cl', m).value; st.theme = $('#th', m).value; applyTheme(); closeModal(); changed(); resetIdle(); toast('Einstellungen gespeichert'); };
+}
+
+/* ====== Master-Passwort ändern ====== */
+function changeMaster() {
+  const m = modal(`<h2>Master-Passwort ändern</h2><p class="sub">Der Tresor wird mit einem neuen Schlüssel komplett neu verschlüsselt.</p>
+    <form id="mf" autocomplete="off">
+    <div class="field"><label>Aktuelles Master-Passwort</label><input class="inp" type="password" id="o" autofocus autocomplete="current-password"></div>
+    <div class="field"><label>Neues Master-Passwort</label><input class="inp" type="password" id="n1" autocomplete="new-password"><div id="mm"></div></div>
+    <div class="field"><label>Neues wiederholen</label><input class="inp" type="password" id="n2" autocomplete="new-password"></div>
+    <div class="err" id="err"></div>
+    <div class="btns"><button type="button" class="btn" id="cancel">Abbrechen</button><button class="btn primary" id="go">${ic('key')}Ändern</button></div></form>`);
+  $('#mm', m).innerHTML = meterHTML('');
+  $('#n1', m).oninput = ev => $('#mm', m).innerHTML = meterHTML(ev.target.value);
+  $('#cancel', m).onclick = closeModal;
+  $('#mf', m).onsubmit = async ev => {
+    ev.preventDefault();
+    const err = $('#err', m), o = $('#o', m).value, n1 = $('#n1', m).value, n2 = $('#n2', m).value;
+    if (n1.length < 10 || strength(n1).score < 2) return err.textContent = 'Neues Passwort zu kurz oder zu schwach.';
+    if (n1 !== n2) return err.textContent = 'Die neuen Eingaben stimmen nicht überein.';
+    busy($('#go', m), true);
+    try { const cur = await Vault.seal(S.key, S.salt, S.iter, {}); await Vault.open(o, cur); }
+    catch { busy($('#go', m), false); return err.textContent = 'Aktuelles Master-Passwort ist falsch.'; }
+    S.salt = crypto.getRandomValues(new Uint8Array(16)); S.iter = ITER; S.key = await Vault.derive(n1, S.salt, S.iter);
+    closeModal(); changed(); toast('Master-Passwort geändert');
+  };
+}
+
+/* ====== Speichern ====== */
+function buildHTML(blob) {
+  const put = (src, id, content) => src.replace(new RegExp(`(<script[^>]*id="${id}"[^>]*>)[\\s\\S]*?(<\\/script>)`), (_, a, b) => a + content + b);
+  let html = put(SOURCE, 'pd-vault', JSON.stringify(blob));
+  html = put(html, 'pd-import', '');
+  html = html.replace(/<html([^>]*?) data-(auto|theme)="[^"]*"/g, '<html$1').replace(/<html([^>]*?) data-(auto|theme)="[^"]*"/g, '<html$1');
+  return html;
+}
+function scheduleSave() { if (!S.handle) return; clearTimeout(S.saveTimer); S.saveTimer = setTimeout(() => save(false), 700); }
+async function save(manual, forcePick = false) {
+  if (!S.key || S.saving) return;
+  S.saving = true; renderStatus();
+  try {
+    S.blob = await Vault.seal(S.key, S.salt, S.iter, S.data);
+    const html = buildHTML(S.blob);
+    if (window.showSaveFilePicker) {
+      if (!S.handle || forcePick) {
+        if (!manual) return;
+        S.handle = await window.showSaveFilePicker({suggestedName:'Passwortdepot.html', types:[{description:'Passwortdepot', accept:{'text/html':['.html']}}]});
+      }
+      const w = await S.handle.createWritable(); await w.write(html); await w.close();
+      S.dirty = false; if (manual) toast('Verschlüsselt gespeichert', 'save');
+    } else {
+      if (!manual) return;
+      download(html, 'Passwortdepot.html', 'text/html');
+      S.dirty = false;
+      modal(`<h2>Datei heruntergeladen</h2><p class="sub">Dein Browser erlaubt kein direktes Überschreiben. Die neue, verschlüsselte <b>Passwortdepot.html</b> liegt in deinen Downloads. Ersetze damit die alte Datei in deinem Passwortdepot-Ordner.</p><div class="btns"><button class="btn primary" onclick="document.querySelector('.overlay').remove()">Verstanden</button></div>`);
+    }
+  } catch (err) {
+    if (err?.name !== 'AbortError') { toast('Speichern fehlgeschlagen: ' + (err?.message || err), 'alert'); if (forcePick) S.handle = null; }
+  } finally { S.saving = false; renderStatus(); }
+}
+function firstSaveDialog(n) {
+  const m = modal(`<h2>🔐 Tresor erstellt</h2>
+    <p class="sub">${n ? `${n} Einträge sind jetzt verschlüsselt. ` : ''}Jetzt noch <b>einmal speichern</b>: Wähle im nächsten Fenster die Datei <b>Passwortdepot.html</b> in deinem Ordner aus und bestätige <b>Ersetzen</b>.</p>
+    <div class="alert info">${ic('info')}<div>Danach ist der unverschlüsselte Import aus der Datei entfernt und die App speichert jede Änderung automatisch.</div></div>
+    <div class="btns"><button class="btn" id="later">Später</button><button class="btn primary" id="go" autofocus>${ic('save')}Jetzt speichern</button></div>`);
+  $('#later', m).onclick = closeModal;
+  $('#go', m).onclick = async () => { closeModal(); await save(true); };
+}
+function download(text, name, type) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], {type})); a.download = name;
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+const stamp = () => new Date().toISOString().slice(0, 10);
+async function downloadBackup() {
+  const blob = await Vault.seal(S.key, S.salt, S.iter, S.data);
+  download(JSON.stringify(blob, null, 1), `Passwortdepot-Backup-${stamp()}.pwdepot`, 'application/json');
+  toast('Verschlüsseltes Backup heruntergeladen', 'download');
+}
+function csvCell(v) { v = String(v ?? ''); return /[",\n;]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+async function exportCSV() {
+  if (!(await confirmBox('Unverschlüsselt exportieren?', 'Die CSV-Datei enthält <b>alle Passwörter im Klartext</b>. Nur nutzen, um zu einem anderen Passwort-Manager zu wechseln, und die Datei danach sofort löschen.', 'Trotzdem exportieren', true))) return;
+  const rows = [['bereich', 'name', 'url', 'username', 'password', 'note', 'extra']];
+  S.data.entries.forEach(e => rows.push([cat(e.cat).name, e.title, e.url, e.username, e.password, e.notes, (e.fields || []).map(f => f.label + ': ' + f.value).join(' | ')]));
+  download('﻿' + rows.map(r => r.map(csvCell).join(',')).join('\r\n'), `Passwortdepot-KLARTEXT-${stamp()}.csv`, 'text/csv');
+}
+function parseCSV(t) {
+  const rows = []; let row = [], cell = '', q = false;
+  const sep = (t.split('\n')[0].match(/;/g) || []).length > (t.split('\n')[0].match(/,/g) || []).length ? ';' : ',';
+  for (let i = 0; i < t.length; i++) {
+    const ch = t[i];
+    if (q) { if (ch === '"') { if (t[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += ch; }
+    else if (ch === '"') q = true; else if (ch === sep) { row.push(cell); cell = ''; }
+    else if (ch === '\n') { row.push(cell.replace(/\r$/, '')); rows.push(row); row = []; cell = ''; }
+    else cell += ch;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter(r => r.some(c => c.trim()));
+}
+function importCSV() {
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.csv,text/csv';
+  inp.onchange = async () => {
+    const f = inp.files[0]; if (!f) return;
+    const rows = parseCSV((await f.text()).replace(/^﻿/, ''));
+    if (rows.length < 2) return toast('Keine Daten gefunden', 'alert');
+    const h = rows[0].map(x => x.trim().toLowerCase());
+    const col = (...names) => h.findIndex(x => names.includes(x));
+    const iT = col('name', 'title', 'titel'), iU = col('username', 'login', 'login_username', 'benutzer', 'user', 'email'), iP = col('password', 'login_password', 'passwort'), iL = col('url', 'login_uri', 'website', 'webseite'), iN = col('note', 'notes', 'notizen', 'extra'), iB = col('bereich', 'folder', 'kategorie');
+    const ask = modal(`<h2>CSV importieren</h2><p class="sub">${rows.length - 1} Zeilen gefunden. In welchen Bereich sollen sie (wenn die Datei keinen eigenen nennt)?</p>
+      <select class="inp" id="c">${S.data.categories.map(c => `<option value="${esc(c.id)}">${esc(c.emoji)} ${esc(c.name)}</option>`).join('')}</select>
+      <div class="btns"><button class="btn" id="cancel">Abbrechen</button><button class="btn primary" id="ok">${ic('upload')}Importieren</button></div>`);
+    $('#cancel', ask).onclick = closeModal;
+    $('#ok', ask).onclick = () => {
+      const def = $('#c', ask).value; let n = 0;
+      rows.slice(1).forEach(r => {
+        const g = i => i >= 0 ? (r[i] || '').trim() : '';
+        const bn = g(iB).toLowerCase(); const bc = S.data.categories.find(c => c.name.toLowerCase() === bn);
+        S.data.entries.push({id:uid(), cat:bc ? bc.id : def, title:g(iT) || g(iL) || 'Import', username:g(iU), password:iP >= 0 ? (r[iP] || '') : '', url:g(iL), notes:g(iN), fields:[], fav:false, review:false, created:now(), updated:now(), source:'CSV ' + f.name});
+        n++;
+      });
+      closeModal(); changed(); toast(n + ' Einträge importiert', 'upload');
+    };
+  };
+  inp.click();
+}
+
+/* ====== Andere Datei öffnen ====== */
+function extractBlob(text) {
+  const m = text.match(/<script[^>]*id="pd-vault"[^>]*>([\s\S]*?)<\/script>/);
+  try { const b = JSON.parse(m ? m[1] : text); return b && b.format === 'passwortdepot' && b.data ? b : null; } catch { return null; }
+}
+function openVaultFile() {
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.html,.htm,.pwdepot,.json';
+  inp.onchange = async () => {
+    const f = inp.files[0]; if (!f) return;
+    const b = extractBlob(await f.text());
+    if (!b) return toast('Keine Passwortdepot-Datei (oder noch nie gespeichert)', 'alert');
+    S.blob = b; S.handle = null; S.pending = null;
+    renderLock(`„${f.name}“ geladen. Gib das Master-Passwort dieses Tresors ein.`);
+  };
+  inp.click();
+}
+
+/* ====== Transparenz ====== */
+function showAbout() {
+  const m = modal(`<h2>Sicherheit & Transparenz</h2><p class="sub">So funktioniert dein Passwortdepot, ohne Geheimnisse.</p>
+  <div class="prose">
+    <h3>🔒 Verschlüsselung</h3>
+    <dl class="kv"><dt>Verfahren</dt><dd><b>AES-256-GCM</b> (Industriestandard, mit Manipulationsschutz)</dd>
+    <dt>Schlüssel</dt><dd>aus deinem Master-Passwort mit <b>PBKDF2-SHA256, 600.000 Runden</b> und zufälligem Salt</dd>
+    <dt>Umsetzung</dt><dd>Web Crypto API des Browsers, keine fremden Bibliotheken</dd>
+    <dt>Version</dt><dd>${APP_VERSION}</dd></dl>
+    <h3>🌐 Kein Internet</h3>
+    <p>Eine Sicherheitsregel im Dateikopf (<b>Content-Security-Policy</b>) verbietet der App jede Netzwerkverbindung. Deine Daten können also nirgendwohin gesendet werden, auch nicht versehentlich.</p>
+    <h3>💾 Wo liegen die Daten?</h3>
+    <p>Nur in dieser einen Datei. Der Tresor steht verschlüsselt im Block <b>pd-vault</b> am Ende der Datei. Du kannst sie mit jedem Texteditor öffnen und siehst nur Zeichensalat. Ordner kopieren genügt, z. B. auf einen USB-Stick.</p>
+    <h3>🔍 Selbst prüfen</h3>
+    <p>Der komplette Programmcode steht lesbar in dieser Datei (Rechtsklick → Seitenquelltext). Es gibt keinen Server, kein Konto und keine Hintertür.</p>
+    <h3>⚠️ Wichtig</h3>
+    <p><b>Master-Passwort vergessen heißt: Daten verloren.</b> Niemand kann es zurücksetzen. Schreib es dir an einem sicheren Ort auf (z. B. Papier im Schrank) und mache regelmäßig ein Backup auf einen USB-Stick.</p>
+    <p>Der Schutz endet dort, wo der Rechner selbst kompromittiert ist (z. B. Schadsoftware, die Tastatureingaben mitschneidet).</p>
+  </div>
+  <div class="btns"><button class="btn primary" id="ok">Verstanden</button></div>`, {wide:true});
+  $('#ok', m).onclick = closeModal;
+}
+
+/* ====== Sperren & Inaktivität ====== */
+async function lock() {
+  if (!S.key) return;
+  closeModal(); $('.menu')?.remove();
+  try { S.blob = await Vault.seal(S.key, S.salt, S.iter, S.data); } catch {}
+  if (S.dirty && S.handle) await save(false);
+  S.key = null; S.data = null; S.v = {cat:'all', q:'', sel:null, reveal:{}};
+  renderLock(S.dirty ? 'Gesperrt. Achtung: Es gibt ungespeicherte Änderungen, nach dem Entsperren bitte speichern.' : 'Gesperrt. Gib dein Master-Passwort ein.');
+}
+function resetIdle() {
+  clearTimeout(S.idle);
+  const min = S.data?.settings?.autolock; if (!S.key || !min) return;
+  S.idle = setTimeout(lock, min * 60000);
+}
+['mousemove', 'keydown', 'mousedown', 'touchstart', 'scroll'].forEach(ev => document.addEventListener(ev, () => { if (S.key) resetIdle(); }, {passive:true, capture:true}));
+document.addEventListener('keydown', ev => {
+  if (ev.key === 'Escape') { if ($('.overlay')) closeModal(); else if ($('.menu')) $('.menu').remove(); }
+  if (!S.key) return;
+  if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 's') { ev.preventDefault(); save(true); }
+  if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'f' && $('#q')) { ev.preventDefault(); $('#q').focus(); $('#q').select(); }
+  if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'l') { ev.preventDefault(); lock(); }
+});
+window.addEventListener('beforeunload', ev => { if (S.dirty) { ev.preventDefault(); ev.returnValue = ''; } });
+
+boot();
+</script>
+</body>
+</html>

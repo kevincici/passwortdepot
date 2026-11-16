@@ -1,0 +1,7 @@
+# Niemals echte Tresor-Daten oder Klartext-Exporte einchecken
+Passwortdepot*.html
+*.pwdepot
+*.csv
+*.json
+!package.json
+node_modules/
