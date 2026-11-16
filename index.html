@@ -1032,7 +1032,8 @@ function extractBlob(text) {
 }
 function pickerRefused(e) {
   const m = modal(`<h2>Datei nicht freigegeben</h2>
-    <p class="sub">Das Auswahlfenster kam ohne Datei zurück. Wenn du eine Datei ausgewählt hast, hat der Browser den direkten Zugriff darauf verweigert. Das passiert z. B. bei Ordnern, die er als Systemordner einstuft.</p>
+    <p class="sub">Das Auswahlfenster kam ohne Datei zurück. Wenn du eine Datei ausgewählt hast, hat der Browser den direkten Zugriff darauf verweigert.</p>
+    <div class="alert warn">${ic('alert')}<div><b>Tipp:</b> Nicht aus „Zuletzt verwendet“, „Start“ oder „Schnellzugriff“ wählen, das sind nur Verknüpfungen. Stattdessen unten ins Feld <b>Dateiname</b> den vollen Pfad eintippen, z. B. <b>C:\\Passwortdepot\\Passwortdepot.pwdepot</b>, und Enter drücken.</div></div>
     <div class="alert info">${ic('info')}<div><b>Normal öffnen</b> liest die Datei trotzdem. Speichern geht dann als Download einer neuen <b>.pwdepot</b>-Datei.</div></div>
     <p class="small muted">Technische Meldung: ${esc((e?.name || 'Fehler') + ': ' + (e?.message || e))}</p>
     <div class="btns"><button class="btn" id="cancel">Schließen</button><button class="btn primary" id="plain" autofocus>${ic('folder')}Normal öffnen</button></div>`);
