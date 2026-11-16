@@ -250,7 +250,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 'use strict';
 /* ====== Grundlagen ====== */
 const SOURCE = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.1.1';
 const ITER = 600000;
 const AAD = new TextEncoder().encode('passwortdepot-v1');
 const $ = (s, r = document) => r.querySelector(s);
@@ -917,8 +917,18 @@ function openVaultFile() {
   const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.html,.htm,.pwdepot,.json';
   inp.onchange = async () => {
     const f = inp.files[0]; if (!f) return;
-    const b = extractBlob(await f.text());
-    if (!b) return toast('Keine Passwortdepot-Datei (oder noch nie gespeichert)', 'alert');
+    const text = await f.text();
+    const b = extractBlob(text);
+    if (!b) {
+      const isApp = /id="pd-vault"/.test(text);
+      const m = modal(`<h2>${isApp ? 'Tresor noch nicht gespeichert' : 'Keine Tresor-Datei'}</h2>
+        <p class="sub">${isApp
+          ? `„${esc(f.name)}“ ist eine Passwortdepot-Datei, enthält aber <b>noch keinen verschlüsselten Tresor</b>. Öffne sie zuerst am PC, lege dein Master-Passwort fest und klicke auf <b>Speichern</b> (dieselbe Datei auswählen, Ersetzen). Danach lädst du die gespeicherte Datei in deinen Cloud-Speicher.`
+          : `„${esc(f.name)}“ ist keine Passwortdepot-Datei. Wähle deine <b>Passwortdepot.html</b> oder ein Backup (<b>.pwdepot</b>).`}</p>
+        <div class="btns"><button class="btn primary" id="ok">Verstanden</button></div>`);
+      $('#ok', m).onclick = closeModal;
+      return;
+    }
     S.blob = b; S.handle = null; S.pending = null;
     renderLock(`„${f.name}“ geladen. Gib das Master-Passwort dieses Tresors ein.`);
   };

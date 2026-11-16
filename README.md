@@ -51,6 +51,7 @@ node tools/upgrade.js index.html "C:/Passwortdepot/Passwortdepot.html"
 
 ## Versionen
 
+- **1.1.1** (2026-11-16): klare Meldung, wenn eine Tresor-Datei geöffnet wird, die noch nie verschlüsselt gespeichert wurde
 - **1.1.0** (2026-11-16): Liste und Details scrollen getrennt (geöffneter Eintrag immer sichtbar, mit Einblend-Animation); Generator-Anzeige kompakter
 - **1.0.1** (2026-11-16): Web-Version zeigt zuerst „Meine Tresor-Datei öffnen“ (für das Handy)
 - **1.0.0** (2026-11-16): erste Version
