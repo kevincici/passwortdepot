@@ -1,4 +1,4 @@
-# 🔐 Passwortdepot
+﻿# 🔐 Passwortdepot
 
 Ein persönlicher, portabler Passwort-Tresor in **einer einzigen HTML-Datei**. Er läuft komplett lokal im Browser: ohne Installation, ohne Server und ohne Konto.
 
@@ -51,6 +51,7 @@ node tools/upgrade.js index.html "C:/Passwortdepot/Passwortdepot.html"
 
 ## Versionen
 
+- **1.2.1** (2026-11-16): Hinweis mit Download-Ersatzweg, wenn das Speichern-Fenster ohne Speichern zurückkehrt
 - **1.2.0** (2026-11-16): Speichern wird nachgeprüft (Datei wird wieder eingelesen); Fehler werden angezeigt, statt still ignoriert zu werden, mit Ersatzweg über Download; jede Änderung wird verschlüsselt im Browser zwischengespeichert und beim nächsten Öffnen zur Wiederherstellung angeboten; Leiste „Noch nicht gespeichert“
 - **1.1.1** (2026-11-16): klare Meldung, wenn eine Tresor-Datei geöffnet wird, die noch nie verschlüsselt gespeichert wurde
 - **1.1.0** (2026-11-16): Liste und Details scrollen getrennt (geöffneter Eintrag immer sichtbar, mit Einblend-Animation); Generator-Anzeige kompakter

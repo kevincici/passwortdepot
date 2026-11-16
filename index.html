@@ -253,7 +253,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 'use strict';
 /* ====== Grundlagen ====== */
 const SOURCE = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.2.1';
 const ITER = 600000;
 const AAD = new TextEncoder().encode('passwortdepot-v1');
 const $ = (s, r = document) => r.querySelector(s);
@@ -866,7 +866,7 @@ async function save(manual, forcePick = false) {
       if (!S.handle || forcePick) {
         if (!manual) return;
         try { S.handle = await window.showSaveFilePicker({suggestedName:'Passwortdepot.html', types:[{description:'Passwortdepot', accept:{'text/html':['.html']}}]}); }
-        catch (e) { if (e?.name === 'AbortError') return; throw e; }   // nur hier bedeutet AbortError "abgebrochen"
+        catch (e) { if (e?.name === 'AbortError') { pickerAborted(html); return; } throw e; }
       }
       await writeAndVerify(html, S.blob.iv);
       S.dirty = false; Autosave.clear();
@@ -881,6 +881,14 @@ async function save(manual, forcePick = false) {
     S.handle = null;
     saveFailed(err, html);
   } finally { S.saving = false; renderStatus(); }
+}
+function pickerAborted(html) {
+  const m = modal(`<h2>Nicht gespeichert</h2>
+    <p class="sub">Das Speichern-Fenster wurde ohne Speichern geschlossen. Falls du nicht selbst abgebrochen hast, hat der Browser das Überschreiben der Datei verweigert.</p>
+    <div class="alert info">${ic('info')}<div><b>Sicherer Weg:</b> „Herunterladen“ legt die verschlüsselte <b>Passwortdepot.html</b> in deinen Download-Ordner. Verschiebe sie danach nach <b>C:\\Passwortdepot</b> und ersetze dort die alte Datei.</div></div>
+    <div class="btns"><button class="btn" id="retry">${ic('refresh')}Nochmal auswählen</button><button class="btn primary" id="dl" autofocus>${ic('download')}Herunterladen</button></div>`);
+  $('#retry', m).onclick = () => { closeModal(); save(true, true); };
+  $('#dl', m).onclick = () => { download(html, 'Passwortdepot.html', 'text/html'); S.dirty = false; renderStatus(); downloadedDialog(); };
 }
 function downloadedDialog() {
   const m = modal(`<h2>Datei heruntergeladen</h2><p class="sub">Die neue, verschlüsselte <b>Passwortdepot.html</b> liegt in deinem <b>Download-Ordner</b>. Verschiebe sie in deinen Passwortdepot-Ordner und ersetze dort die alte Datei.</p><div class="btns"><button class="btn primary" id="ok">Verstanden</button></div>`);
