@@ -253,7 +253,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 <script>
 'use strict';
 /* ====== Grundlagen ====== */
-const APP_VERSION = '2.0.2';
+const APP_VERSION = '2.0.3';
 const ITER = 600000;
 const AAD = new TextEncoder().encode('passwortdepot-v1');
 const $ = (s, r = document) => r.querySelector(s);
@@ -1025,6 +1025,15 @@ function extractBlob(text) {
   const m = text.match(/<script[^>]*id="pd-vault"[^>]*>([\s\S]*?)<\/script>/);
   try { const b = JSON.parse(m ? m[1] : text); return b && b.format === 'passwortdepot' && b.data ? b : null; } catch { return null; }
 }
+function pickerRefused(e) {
+  const m = modal(`<h2>Datei nicht freigegeben</h2>
+    <p class="sub">Das Auswahlfenster kam ohne Datei zurück. Wenn du eine Datei ausgewählt hast, hat der Browser den direkten Zugriff darauf verweigert. Das passiert z. B. bei Ordnern, die er als Systemordner einstuft.</p>
+    <div class="alert info">${ic('info')}<div><b>Normal öffnen</b> liest die Datei trotzdem. Speichern geht dann als Download einer neuen <b>.pwdepot</b>-Datei.</div></div>
+    <p class="small muted">Technische Meldung: ${esc((e?.name || 'Fehler') + ': ' + (e?.message || e))}</p>
+    <div class="btns"><button class="btn" id="cancel">Schließen</button><button class="btn primary" id="plain" autofocus>${ic('folder')}Normal öffnen</button></div>`);
+  $('#cancel', m).onclick = closeModal;
+  $('#plain', m).onclick = () => { closeModal(); openViaInput(); };
+}
 function notAVault(name, text) {
   const isApp = /id="pd-vault"/.test(text);
   const m = modal(`<h2>${isApp ? 'Das ist das Programm' : 'Keine Tresor-Datei'}</h2>
@@ -1044,7 +1053,7 @@ async function openVaultFile() {
   if (HAS_FS) {
     let h;
     try { [h] = await window.showOpenFilePicker({types:[{description:'Passwortdepot-Tresor', accept:{'application/octet-stream':['.pwdepot'], 'text/html':['.html']}}]}); }
-    catch (e) { if (e?.name !== 'AbortError') toast('Öffnen fehlgeschlagen: ' + (e?.message || e), 'alert'); return; }
+    catch (e) { return pickerRefused(e); }
     try {
       const f = await h.getFile(), text = await f.text(), b = extractBlob(text);
       if (!b) return notAVault(f.name, text);
@@ -1056,7 +1065,10 @@ async function openVaultFile() {
       $('#ok', m).onclick = closeModal; return;
     }
   }
-  // Handy / Browser ohne Dateizugriff: nur lesen, Speichern = Download
+  openViaInput();
+}
+// Klassisches Öffnen (funktioniert überall): Datei wird gelesen, Speichern geht dann als Download.
+function openViaInput() {
   const inp = document.createElement('input'); inp.type = 'file';
   inp.onchange = async () => {
     const f = inp.files[0]; if (!f) return;
