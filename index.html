@@ -253,7 +253,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 <script>
 'use strict';
 /* ====== Grundlagen ====== */
-const APP_VERSION = '2.0.1';
+const APP_VERSION = '2.0.2';
 const ITER = 600000;
 const AAD = new TextEncoder().encode('passwortdepot-v1');
 const $ = (s, r = document) => r.querySelector(s);
@@ -865,10 +865,12 @@ function changeMaster() {
 
 /* ====== Speichern (Tresor-Datei *.pwdepot) ====== */
 // Merkt sich nur den VERWEIS auf die Tresor-Datei im Browser (IndexedDB), nie deren Inhalt.
+// Jede Browser-Speicher-Operation hat ein Zeitlimit: Sie darf die App nie anhalten.
+const withTimeout = (p, ms, fallback) => Promise.race([p, new Promise(res => setTimeout(() => res(fallback), ms))]);
 const IDB = {
-  open() { return new Promise((res, rej) => { const r = indexedDB.open('passwortdepot', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); },
-  async get(k) { try { const d = await this.open(); return await new Promise(res => { const q = d.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => res(q.result || null); q.onerror = () => res(null); }); } catch { return null; } },
-  async set(k, v) { try { const d = await this.open(); await new Promise(res => { const t = d.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = res; t.onerror = res; }); } catch {} }
+  open() { return new Promise((res, rej) => { const r = indexedDB.open('passwortdepot', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); r.onblocked = () => rej(new Error('blocked')); }); },
+  get(k) { return withTimeout((async () => { try { const d = await this.open(); return await new Promise(res => { const q = d.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => res(q.result || null); q.onerror = () => res(null); }); } catch { return null; } })(), 1500, null); },
+  set(k, v) { return withTimeout((async () => { try { const d = await this.open(); await new Promise(res => { const t = d.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = res; t.onerror = res; t.onabort = res; }); } catch {} })(), 1500, undefined); }
 };
 const PICK_TYPES = [{description:'Passwortdepot-Tresor', accept:{'application/octet-stream':['.pwdepot']}}];
 // Leerer Tresor bekommt einen anderen Vorschlagsnamen, damit er nie versehentlich den echten überschreibt.
@@ -1043,11 +1045,16 @@ async function openVaultFile() {
     let h;
     try { [h] = await window.showOpenFilePicker({types:[{description:'Passwortdepot-Tresor', accept:{'application/octet-stream':['.pwdepot'], 'text/html':['.html']}}]}); }
     catch (e) { if (e?.name !== 'AbortError') toast('Öffnen fehlgeschlagen: ' + (e?.message || e), 'alert'); return; }
-    const f = await h.getFile(), text = await f.text(), b = extractBlob(text);
-    if (!b) return notAVault(f.name, text);
-    if (/\.html?$/i.test(f.name)) return loaded(f.name, b, null);   // alte Version: Tresor in HTML
-    await rememberHandle(h);
-    return loaded(f.name, b, h);
+    try {
+      const f = await h.getFile(), text = await f.text(), b = extractBlob(text);
+      if (!b) return notAVault(f.name, text);
+      if (/\.html?$/i.test(f.name)) return loaded(f.name, b, null);   // alte Version: Tresor in HTML
+      await rememberHandle(h);
+      return loaded(f.name, b, h);
+    } catch (e) {
+      const m = modal(`<h2>Datei konnte nicht geöffnet werden</h2><p class="sub">Technische Meldung: ${esc((e?.name || 'Fehler') + ': ' + (e?.message || e))}</p><div class="btns"><button class="btn primary" id="ok">OK</button></div>`);
+      $('#ok', m).onclick = closeModal; return;
+    }
   }
   // Handy / Browser ohne Dateizugriff: nur lesen, Speichern = Download
   const inp = document.createElement('input'); inp.type = 'file';
