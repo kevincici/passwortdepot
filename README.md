@@ -43,13 +43,14 @@ In Firefox und Safari lädt „Speichern“ stattdessen eine neue Datei herunter
 | Skript | Zweck |
 |---|---|
 | `tools/build.js` | Baut eine App-Datei mit einmaligem Erst-Import (JSON), der beim ersten Speichern verschlüsselt wird |
-| `tools/update.js` | Übernimmt den verschlüsselten Tresor aus einer bestehenden Datei in eine neue App-Version |
+| `tools/upgrade.js` | Bringt eine bestehende Tresor-Datei auf die neue App-Version; der verschlüsselte Tresor bleibt unverändert, das Master-Passwort ist nicht nötig |
 
 ```bash
-node tools/update.js index.html "C:/Passwortdepot/Passwortdepot.html" Passwortdepot-neu.html
+node tools/upgrade.js index.html "C:/Passwortdepot/Passwortdepot.html"
 ```
 
 ## Versionen
 
+- **1.1.0** (2026-11-16): Liste und Details scrollen getrennt (geöffneter Eintrag immer sichtbar, mit Einblend-Animation); Generator-Anzeige kompakter
 - **1.0.1** (2026-11-16): Web-Version zeigt zuerst „Meine Tresor-Datei öffnen“ (für das Handy)
 - **1.0.0** (2026-11-16): erste Version
